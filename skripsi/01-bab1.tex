@@ -37,7 +37,7 @@ Penelitian ini bermaksud untuk membuktikan bahwa HFV, dengan menangkap perilaku 
 %-----------------------------------------------------------------------------%
 Untuk menjembatani kesenjangan dan menjawab tantangan seperti yang telah diuraikan di latar belakang, penelitian ini difokuskan untuk menjawab pertanyaan-pertanyaan berikut:
 \begin{enumerate}
-    \item Bagaimana cara mengembangkan suatu kerangka kerja klasifikasi yang mampu mengidentifikasi secara granular, baik aplikasi spesifik (misalnya, YouTube, Skype) maupun kategori aplikasi (misalnya, Streaming, VoIP), di dalam aliran lalu lintas VPN yang telah terenkripsi penuh tanpa melakukan dekripsi payload?
+    \item Bagaimana cara mengembangkan suatu kerangka kerja klasifikasi yang mampu mengidentifikasi secara granular, baik aplikasi spesifik (misalnya, YouTube, Skype) maupun kategori aplikasi (misalnya, Streaming, VoIP), di dalam \textit{flow} lalu lintas VPN yang telah terenkripsi penuh tanpa melakukan dekripsi payload?
     
     \item Bagaimana merancang dan mengimplementasikan sebuah model representasi fitur hibrida, Hybrid Flow Vector (HFV) = (alpha, beta, gamma), yang secara kohesif mengintegrasikan tiga pilar analisis: (a) pola \textit{level-byte} dari \textit{raw payload}, (b) profil statistik \textit{flow-level} yang \textit{robust}, serta (c) dinamika statistik \textit{burst-level}?
     
@@ -50,9 +50,9 @@ Untuk menjembatani kesenjangan dan menjawab tantangan seperti yang telah diuraik
 %-----------------------------------------------------------------------------%
 Selaras dengan rumusan masalah yang telah dipaparkan, tujuan dari penelitian ini adalah sebagai berikut:
 \begin{enumerate}
-    \item Membangun sebuah kerangka kerja yang mampu melakukan klasifikasi \textit{fine-grained} (identifikasi aplikasi dan kategori aplikasi) terhadap lalu lintas VPN terenkripsi, dengan mengandalkan analisis \textit{payload} terenkripsi dan perilaku aliran data tanpa melakukan dekripsi \textit{payload} (plaintext).
+    \item Membangun sebuah kerangka kerja yang mampu melakukan klasifikasi \textit{fine-grained} (identifikasi aplikasi dan kategori aplikasi) terhadap lalu lintas VPN terenkripsi, dengan mengandalkan analisis \textit{payload} terenkripsi dan perilaku \textit{flow} data tanpa melakukan dekripsi \textit{payload} (plaintext).
     
-    \item Merancang dan mengimplementasikan sebuah model representasi fitur hibrida, Hybrid Flow Vector (HFV) = (alpha, beta, gamma), yang secara komplementer mengintegrasikan fitur \textit{deep learning} berbasis \textit{payload} dengan fitur rekayasa statistik berbasis aliran dan \textit{burst}.
+    \item Merancang dan mengimplementasikan sebuah model representasi fitur hibrida, Hybrid Flow Vector (HFV) = (alpha, beta, gamma), yang secara komplementer mengintegrasikan fitur \textit{deep learning} berbasis \textit{payload} dengan fitur rekayasa statistik berbasis \textit{flow} dan \textit{burst}.
 
     \item Mengevaluasi dan membuktikan secara kuantitatif bahwa kerangka kerja HFV yang diusulkan mampu mencapai kinerja klasifikasi yang tinggi, akurat, dan \textit{robust}; serta menganalisis kombinasi fitur optimal untuk skenario klasifikasi yang berbeda (misalnya, klasifikasi umum vs. klasifikasi khusus VPN).
 \end{enumerate}
@@ -91,7 +91,7 @@ Untuk menjaga fokus dan kelayakan studi, terdapat beberapa batasan yang perlu di
 \begin{enumerate}
     \item Generalisasi model terbatas pada karakteristik dataset ISCX 2016, yang mungkin belum sepenuhnya merepresentasikan pola lalu lintas aplikasi VPN modern.
     
-    \item Proses \textit{pre-processing} sedemikian rupa menghasilkan (\textit{flow}) data ideal, sehingga cakupan model tidak mencakup analisis terhadap aliran data terfragmentasi atau tidak lengkap.
+    \item Proses \textit{pre-processing} sedemikian rupa menghasilkan \textit{flow} data ideal, sehingga cakupan model tidak mencakup analisis terhadap \textit{flow} data terfragmentasi atau tidak lengkap.
     
     \item Ruang lingkup \textit{feature engineering} terfokus secara eksklusif pada tiga pilar yang didefinisikan dalam kerangka Hybrid Flow Vector (HFV): ($\alpha$) fitur 1D-CNN, ($\beta$) statistik \textit{flow}, dan ($\gamma$) statistik \textit{burst}.
     
@@ -106,13 +106,13 @@ Laporan \ac{TA} ini disusun secara sistematis ke dalam lima bab utama yang salin
 
 \begin{enumerate}
     \item \textbf{Bab 1: Pendahuluan.} 
-    Bab ini menyajikan gambaran umum penelitian. Bagian ini diawali dengan latar belakang yang menjelaskan urgensi masalah akibat masifnya adopsi enkripsi dan VPN , yang menyebabkan metode analisis tradisional seperti DPI menjadi tidak efektif. Bab ini juga memaparkan rumusan masalah yang berfokus pada kesenjangan (gap) dalam klasifikasi fine-grained, serta menjabarkan tujuan penelitian, manfaat (teoritis dan praktis), batasan penelitian, dan diakhiri dengan sistematika penulisan laporan ini.
+    Bab ini menyajikan gambaran umum penelitian. Bagian ini diawali dengan latar belakang yang menjelaskan urgensi masalah akibat masifnya adopsi enkripsi dan VPN, yang menyebabkan metode analisis tradisional seperti DPI menjadi tidak efektif. Bab ini juga memaparkan rumusan masalah yang berfokus pada kesenjangan (gap) dalam klasifikasi fine-grained, serta menjabarkan tujuan penelitian, manfaat (teoritis dan praktis), batasan penelitian, dan diakhiri dengan sistematika penulisan laporan ini.
     
     \item \textbf{Bab 2: Tinjauan Pustaka dan Landasan Teori.} 
-    Bab ini menguraikan landasan konseptual dan tinjauan penelitian terdahulu yang relevan. Bagian ini mencakup pembahasan mengenai Encrypted Traffic Analysis (ETA), prinsip-prinsip klasifikasi berbasis aliran (flow-based), dan evolusi teknik klasifikasi lalu lintas VPN. Tinjauan kritis terhadap metode-metode yang ada (seperti pendekatan statistik, deep learning, dan representasi gambar ) dilakukan untuk memvalidasi kesenjangan penelitian yang diidentifikasi, sehingga memperkuat posisi dan kebaruan dari metodologi Hybrid Flow Vector (HFV) yang diusulkan.
+    Bab ini menguraikan landasan konseptual dan tinjauan penelitian terdahulu yang relevan. Bagian ini mencakup pembahasan mengenai Encrypted Traffic Analysis (ETA), prinsip-prinsip klasifikasi berbasis \textit{flow} (flow-based), dan evolusi teknik klasifikasi lalu lintas VPN. Tinjauan kritis terhadap metode-metode yang ada (seperti pendekatan statistik, deep learning, dan representasi gambar ) dilakukan untuk memvalidasi kesenjangan penelitian yang diidentifikasi, sehingga memperkuat posisi dan kebaruan dari metodologi Hybrid Flow Vector (HFV) yang diusulkan.
     
     \item \textbf{Bab 3: Alur Kerja Sistem Hybrid Flow Vector (HFV).} 
-    Bab ini merupakan inti teknis yang menjelaskan secara detail alur kerja penelitian. Pembahasan dimulai dari pemilihan dataset ISCX 2016 dan tahap pra-pemrosesan data secara rigid, termasuk konversi paket-ke-aliran menggunakan SplitCap, verifikasi TCP handshake, dan pemfilteran noise, yang menghasilkan \textit{flow} data bersih. Bagian utama bab ini memaparkan perancangan dan implementasi kerangka kerja baru Hybrid Flow Vector (HFV) $\Omega=(\alpha,\beta,\gamma)$, dengan merinci implementasi setiap komponen: $\alpha$ (ekstraksi 1D-CNN dari pola \textit{byte-level}), $\beta$ (statistik \textit{flow-level}), dan $\gamma$ (statistik \textit{burst-level}). Bab ini ditutup dengan penjelasan tentang pembuatan basis data fitur (CSV) dan arsitektur model machine learning yang digunakan untuk klasifikasi.
+    Bab ini merupakan inti teknis yang menjelaskan secara detail alur kerja penelitian. Pembahasan dimulai dari pemilihan dataset ISCX 2016 dan tahap pra-pemrosesan data secara rigid, termasuk konversi paket-ke-\textit{flow} menggunakan SplitCap, verifikasi TCP handshake, dan pemfilteran noise, yang menghasilkan \textit{flow} data bersih. Bagian utama bab ini memaparkan perancangan dan implementasi kerangka kerja baru Hybrid Flow Vector (HFV) $\Omega=(\alpha,\beta,\gamma)$, dengan merinci implementasi setiap komponen: $\alpha$ (ekstraksi 1D-CNN dari pola \textit{byte-level}), $\beta$ (statistik \textit{flow-level}), dan $\gamma$ (statistik \textit{burst-level}). Bab ini ditutup dengan penjelasan tentang pembuatan basis data fitur (CSV) dan arsitektur model machine learning yang digunakan untuk klasifikasi.
     
     \item \textbf{Bab 4: Hasil dan Pembahasan.} 
     Bab ini menyajikan temuan empiris dari implementasi metodologi yang telah dirancang. Bagian ini akan memaparkan secara rinci skenario pengujian dan metrik evaluasi yang digunakan. Hasil kinerja model machine learning yang dilatih menggunakan basis data HFV  akan disajikan secara kuantitatif, mencakup performa untuk tugas klasifikasi aplikasi dan klasifikasi kategori. Bagian pembahasan akan menganalisis secara mendalam temuan tersebut, menginterpretasi kemampuan model, dan membandingkan efektivitas kerangka kerja HFV dalam memberikan visibilitas terhadap lalu lintas terenkripsi dibandingkan dengan pendekatan lainnya.

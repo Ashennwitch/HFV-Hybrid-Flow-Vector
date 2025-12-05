@@ -2,6 +2,17 @@
 \chapter{\babTiga}
 \label{cha:perancangansistem}
 
+\section{\textit{Overview} Kerangka Kerja}
+Secara garis besar, penelitian ini dilakukan dengan alur seperti pada Gambar \ref{fig:macro_arch}.
+
+\begin{figure}[H]
+    \centering
+    \captionsetup{font=small}
+\includegraphics[height=0.6\textheight, keepaspectratio]{assets/pics/macro_acrch.png}
+\caption{Arsitektur HFV.}
+    \label{fig:macro_arch}
+\end{figure}
+
 \section{Pemilihan dan Pra-Pemrosesan Dataset ISCX 2016}
 
 \subsection{Deskripsi Dataset ISCX 2016}
@@ -35,8 +46,7 @@ Tujuan dari pra-pemrosesan dataset ISCX 2016 adalah untuk mengubah data mentah \
 
 Proses ini didasarkan pada metodologi yang diuraikan oleh \citep{park2024fast}, yang mengadopsi dan memperluas proses pembersihan dua tahap dari \citep{baek2023preprocessing}. Pra-pemrosesan ini terdiri dari tiga langkah utama:
 
-\medskip
-\noindent\textbf{1. Konversi Paket-ke-Flow (menggunakan SplitCap)} \\
+\subsubsection{Konversi Paket-ke-Flow (menggunakan SplitCap)}
 Langkah pertama adalah mengubah file \texttt{.pcap} mentah menjadi \textit{bidirectional flows} (sesi). Konversi ini krusial karena analisis level \textit{flow} (konversasi utuh) memberikan konteks yang jauh lebih kaya daripada analisis level paket (kata-kata individual). Analisis \textit{flow} juga memungkinkan ekstraksi fitur statistik yang lebih bermakna (misalnya, durasi \textit{flow}, total byte, waktu antar-paket) yang esensial untuk membedakan trafik terenkripsi tanpa perlu menginspeksi \textit{payload}.
 
 Untuk tugas ini, \textit{tool} SplitCap digunakan. SplitCap dipilih karena merupakan \textit{tool} khusus yang teroptimasi (ditulis dalam C/C++) untuk menangani file \texttt{.pcap} besar secara efisien dan akurat dalam mengelola sesi, yang esensial untuk mereproduksi metodologi penelitian.
@@ -99,8 +109,7 @@ def run_splitcap(pcap_file_path, output_dir):
 \label{lst:splitcap_automation}
 \end{listing}
 
-\medskip
-\noindent\textbf{2. Pembersihan Awal (Rule A \& B)} \\
+\subsubsection{Pembersihan Awal (Rule A \& B)}
 Setelah semua \texttt{.pcap} dikonversi menjadi \textit{flow} (total $\sim$310.000), proses pembersihan dua tahap yang diadopsi dari \citep{baek2023preprocessing} diterapkan:
 \begin{enumerate}
     \item \textbf{Penghapusan Flow Berbasis Protokol (Rule A):} \textit{Flow} yang menggunakan protokol yang tidak relevan dengan aplikasi pengguna, seperti DNS, NBSS, dan LLMNR, dihapus.
@@ -109,8 +118,7 @@ Setelah semua \texttt{.pcap} dikonversi menjadi \textit{flow} (total $\sim$310.0
 
 Setelah penerapan kedua aturan ini, jumlah \textit{flow} berkurang secara signifikan menjadi \textbf{29.195 \textit{flow}}.
 
-\medskip
-\noindent\textbf{3. Penyaringan Tambahan (Rule C)} \\
+\subsubsection{Penyaringan Tambahan (Rule C)}
 Langkah terakhir adalah penyaringan tambahan yang diimplementasikan oleh \citep{park2024fast} untuk menghilangkan \textit{flow} yang dianggap tidak penting untuk tujuan penelitian. Penyaringan ini (disebut Rule C) secara spesifik mencari dan menghapus \textit{flow} yang memenuhi \textit{semua} kriteria berikut:
 \begin{itemize}
     \item Protokol adalah \textbf{UDP}.
@@ -652,12 +660,17 @@ Setelah pelatihan selesai, bagian \textit{classifier} dibuang, dan model \textit
     \label{lst:snippet_alpha3}
 \end{listing}
 
-Hasil dari Fase 2 adalah \textit{array} 2D \texttt{(jumlah\_sampel, 128)}. Ini adalah \textbf{komponen fitur $\alpha$} final, yang kemudian disimpan ke file CSV untuk digabungkan dengan komponen $\beta$ dan $\gamma$.
+Hasil dari Fase 2 adalah \textit{array} 2D \texttt{(jumlah\_sampel, 128)}. Ini adalah \textbf{komponen fitur $\alpha$} final, yang kemudian disimpan ke file CSV untuk digabungkan dengan komponen $\beta$ dan $\gamma$. Ilsutrasi dari proses yang dilakukan pada tahap ini terlihat pada Gambar \ref{fig:alpha_extraction_vertical}
 
 \begin{figure}[H]
     \centering
     \begin{tikzpicture}[
-        node distance=2.5cm and 2cm, % Jarak vertikal & horizontal lebih longgar
+        % Use 'positioning' library logic
+        node distance=0.8cm and 1cm, 
+        % Global styles
+        font=\small,
+        >=Stealth,
+        % Node Styles
         block/.style = {
             rectangle, draw, thick, fill=blue!10,
             text width=11em, text centered, rounded corners,
@@ -665,79 +678,69 @@ Hasil dari Fase 2 adalah \textit{array} 2D \texttt{(jumlah\_sampel, 128)}. Ini a
         },
         data_node/.style = {
             cylinder, draw, thick, fill=orange!10,
-            shape aspect=0.3, minimum height=2.5em, text centered,
+            shape aspect=0.25, minimum height=3em, text centered,
             text width=10em, drop shadow
         },
         label_node/.style = {
-            cylinder, draw, thick, fill=green!10, shape aspect=0.3,
-            minimum height=2.5em, text centered, text width=10em, 
+            cylinder, draw, thick, fill=green!10, shape aspect=0.25,
+            minimum height=2.5em, text centered, text width=9em, 
             drop shadow
         },
+        note/.style = {
+            text width=12em, align=center, font=\scriptsize, color=black!80
+        },
         arrow/.style = {
-            thick, ->, >=Stealth
+            thick, ->
         }
     ]
         
-        \small
+        % --- 1. START: PCAP ---
+        \node (pcap) [data_node] {Flow .pcap Bersih\\ \scriptsize (dari Pra-Pemrosesan)};
         
-        % --- Alur Vertikal ---
+        % --- 2. STEP 1 ---
+        \node (step1) [block, below=of pcap] {\textbf{Fase 1: Ekstraksi Payload} \\ \texttt{(...1.py)}};
+        \node (step1_note) [note, below=0.0cm of step1] {10 pkt $\times$ 784 byte.\\Normalisasi 0.0-1.0.};
         
-        % Fase 1: Ekstraksi Payload
-        \node (pcap) [data_node] {Flow .pcap Bersih};
+        % --- 3. RAW PAYLOAD ---
+        \node (npy) [data_node, below=of step1_note] {Data Payload Mentah};
+        \node (npy_note) [note, below=0.0cm of npy] {Bentuk: (N, 7840, 1)};
+
+        % --- 4. MODEL CONTAINER (Outer Box) ---
+        % FIX: Increased height to 8cm so the Softmax layer stays strictly inside
+        \node (model) [block, fill=red!5, below=1.2cm of npy_note, text width=14em, minimum height=8cm] {};
         
-        \node (step1) [block, below=of pcap] {Fase 1: Ekstraksi Payload \texttt{(...1.py)}};
+        % Title
+        \node [below=0.2cm, align=center] at (model.north) {\textbf{Fase 2: Arsitektur 1D-CNN} \\ \texttt{(...2.py)}};
+
+        % --- INTERNAL LAYERS ---
+        % Adjusted spacing so they flow nicely inside the taller box
+        \node (conv) [rectangle, draw, fill=white, text width=10em, text centered, minimum height=2em, drop shadow, below=1.5cm of model.north] {Blok Konvolusi\\(Conv/Pool)};
         
-        % Node untuk keterangan Fase 1
-        \node (desc1) [below=0.4cm of step1, text width=11em, align=center, font=\tiny] 
-            {10 pkt $\times$ 784 byte.\\Normalisasi 0.0-1.0.};
+        \node (encoder) [rectangle, draw, fill=yellow!20, text width=10em, text centered, minimum height=2em, drop shadow, below=0.8cm of conv] {Lapisan Encoder\\(Dense 128)};
         
-        \node (npy) [data_node, below=3cm of step1] {Data Payload Mentah};
+        \node (classifier) [rectangle, draw, fill=white, text width=10em, text centered, minimum height=2em, drop shadow, below=0.8cm of encoder] {Lapisan Klasifikasi\\(Softmax)};
         
-        % Node untuk keterangan bentuk data
-        \node (desc_npy) [below=0.4cm of npy, font=\tiny] 
-            {Bentuk: (N, 7840, 1)};
-        
-        % Panah Fase 1
+        % --- 5. SIDE INPUT (LABELS) ---
+        % FIX: Moved 'right=4.5cm' to create a long arrow, solving the text overlap
+        \node (labels) [label_node, right=4.5cm of model.north east, anchor=center, yshift=-2.5cm] {Label Aplikasi};
+        \node (labels_note) [note, below=0.1cm of labels] {(Mis: 'Skype')};
+
+        % --- 6. OUTPUT ---
+        % Moved alpha down significantly to allow room for the long arrow text
+        \node (alpha) [data_node, fill=yellow!20, below=2cm of model] {Komponen Fitur $\alpha$};
+        \node (alpha_note) [note, below=0.0cm of alpha] {Bentuk: (N, 128)};
+
+        % --- ARROWS ---
         \draw [arrow] (pcap) -- (step1);
-        \draw [arrow] (step1) -- (npy);
+        \draw [arrow] (step1) -- (step1_note) -- (npy);
+        \draw [arrow] (npy_note) -- node[left, font=\scriptsize, align=right] {(Data Latih)} (model);
         
-        % Fase 2: Input Pelatihan
-        \node (labels) [label_node, right=2.5cm of npy, yshift=1cm] {Label Aplikasi};
-        \node (desc_labels) [below=0.4cm of labels, font=\tiny, xshift=2mm] 
-            {(Mis: 'Skype')};
-        
-        % Model container
-        \node (model) [block, fill=red!5, below=4cm of npy, text width=13em, 
-                      minimum height=10em] {};
-        
-        % Node internal dalam model dengan positioning relatif yang lebih rapi
-        \node (conv) [draw, fill=white, text width=11em, text centered, 
-                     minimum height=2em, drop shadow, anchor=north] 
-                     at ([yshift=-0.6cm]model.north) {Blok Konvolusi (Conv/Pool)};
-        \node (encoder) [draw, fill=yellow!20, text width=11em, text centered, 
-                        minimum height=2em, drop shadow, below=1cm of conv] 
-                        {Lapisan Encoder (Dense 128)};
-        \node (classifier) [draw, fill=white, text width=11em, text centered, 
-                           minimum height=2em, drop shadow, below=1cm of encoder] 
-                           {Lapisan Klasifikasi (Softmax)};
-        
-        % Judul model
-        \node [above=0.2cm of model.north, font=\small, anchor=south] 
-              {Fase 2: Arsitektur 1D-CNN \texttt{(...2.py)}};
-        
-        % Panah Pelatihan dengan posisi label yang lebih jelas
-        \draw [arrow] (npy) -- node[left, pos=0.3, font=\tiny] {(Data Latih)} (model.north);
-        \draw [arrow] (labels.west) -| node[above right, pos=0.2, font=\tiny] {(Target Latih)} (model.east);
-        
-        % Fase 2b: Generasi Fitur
-        \node (alpha) [data_node, fill=yellow!20, below=4.5cm of model] {Komponen Fitur $\alpha$};
-        \node (desc_alpha) [below=0.4cm of alpha, font=\tiny] 
-            {Bentuk: (N, 128)};
-        
-        % Panah Ekstraksi dengan label yang dipendekkan dan posisi yang lebih baik
-        \draw [arrow, line width=1.5pt] (model.south) -- node[right, pos=0.6, align=center, 
-            text width=7em, font=\tiny] {Ekstraksi fitur dari\\lapisan \textbf{encoder}} (alpha.north);
-        
+        % FIX: Arrow goes straight horizontal to the model edge
+        \draw [arrow] (labels.west) -- node[above, font=\scriptsize] {(Target)} (labels.west -| model.east);
+
+        % Output arrow
+        \draw [arrow, line width=1.5pt] (model.south) -- node[midway, right, align=left, font=\scriptsize, text width=15em, xshift=0.2cm] {Generasi Fitur \texttt{.predict()} dari \textbf{encoder}} (alpha);
+
     \end{tikzpicture}
     \caption{Diagram alir proses ekstraksi komponen fitur $\alpha$ (alpha). Data payload mentah diekstrak dari \texttt{.pcap} (Fase 1), kemudian sebuah 1D-CNN dilatih untuk mengklasifikasikan aplikasi. Lapisan \textit{encoder} (Dense 128) dari model yang telah dilatih kemudian digunakan untuk menghasilkan vektor fitur $\alpha$ akhir.}
     \label{fig:alpha_extraction_vertical}
@@ -748,9 +751,7 @@ Hasil dari Fase 2 adalah \textit{array} 2D \texttt{(jumlah\_sampel, 128)}. Ini a
 
 Komponen $\beta$ dirancang untuk menangkap \textbf{pola makroskopis} dari keseluruhan \textit{flow} jaringan. Komponen ini didasarkan pada hipotesis bahwa bahkan ketika \textit{payload} dienkripsi, karakteristik perilaku statistik dari aliran---seperti seberapa sering, seberapa besar, dan kapan paket dikirim---dapat mengungkapkan informasi penting tentang aplikasi yang mendasarinya \citep{DraperGil2016}.
 
-Komponen ini (disebut sebagai \textit{Delta ($\delta$)} dalam dokumentasi proyek awal) menggantikan komponen $\beta$ asli dari model PESV, yang bergantung pada perbandingan prototipe yang ambigu (seperti dijelaskan dalam \ref{cha:pendahuluan}). Komponen $\beta$ yang baru ini jauh lebih tangguh karena secara langsung menghitung profil statistik deskriptif dari aliran itu sendiri, tanpa memerlukan perbandingan eksternal.
-
-Implementasi ekstraksi fitur $\beta$ dilakukan oleh skrip \texttt{v2\_beta.py} (merujuk pada \texttt{v2-delta.ipynb}). Logika inti dari skrip ini diringkas dalam Pseudocode \ref{lst:pseudo_beta}.
+Implementasi ekstraksi fitur $\beta$ dilakukan oleh skrip \texttt{v2\_beta.py}. Logika inti dari skrip ini diringkas dalam Pseudocode \ref{lst:pseudo_beta}.
 
 \begin{listing}[H]
 \setstretch{1}
