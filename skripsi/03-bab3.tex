@@ -8,7 +8,7 @@ Secara garis besar, penelitian ini dilakukan dengan alur seperti pada Gambar \re
 \begin{figure}[H]
     \centering
     \captionsetup{font=small}
-\includegraphics[height=0.6\textheight, keepaspectratio]{assets/pics/macro_acrch.png}
+\includegraphics[height=0.7\textheight, keepaspectratio]{assets/pics/macro_acrch1.png}
 \caption{Arsitektur HFV.}
     \label{fig:macro_arch}
 \end{figure}
@@ -51,50 +51,63 @@ Langkah pertama adalah mengubah file \texttt{.pcap} mentah menjadi \textit{bidir
 
 Untuk tugas ini, \textit{tool} SplitCap digunakan. SplitCap dipilih karena merupakan \textit{tool} khusus yang teroptimasi (ditulis dalam C/C++) untuk menangani file \texttt{.pcap} besar secara efisien dan akurat dalam mengelola sesi, yang esensial untuk mereproduksi metodologi penelitian.
 
-Untuk mengotomatisasi pemrosesan pada seluruh dataset, sebuah skrip Python digunakan untuk memanggil SplitCap pada setiap file \texttt{.pcap}, seperti yang ditunjukkan pada Kode~\ref{lst:splitcap_automation}. Perlu dicatat penambahan argumen \texttt{-p 500} yang penting untuk membatasi sesi paralel dan menghindari galat ``Too many open files''.
-
-\begin{listing}[H]
-    \setstretch{1}    
-    \begin{algorithmic}[1] % [1] adds line numbers
-        \Procedure{RunSplitCap}{$pcap\_file\_path, output\_dir$}
-            \State $split\_argument \gets \text{'session'}$ \Comment{Mode bidirectional flows}
-            \State $parallel\_limit \gets \text{'500'}$ \Comment{Limit file handles}
-            
-            \State $command \gets$ list()
-            \State $command.append(\text{'mono'})$
-            \State $command.append(\text{SPLITCAP\_EXECUTABLE})$
-            \State $command.append(\text{'-r'}, pcap\_file\_path)$
-            \State $command.append(\text{'-o'}, output\_dir)$
-            \State $command.append(\text{'-s'}, split\_argument)$
-            \State $command.append(\text{'-p'}, parallel\_limit)$
-            
-            \State \Call{SystemExecute}{$command$}
-            \State \Return \textbf{True}
-        \EndProcedure
-    \end{algorithmic}
-        \caption{Otomasi Command SplitCap} 
-    \label{lst:splitcap_automation}
-\end{listing}
+Untuk mengotomatisasi pemrosesan pada seluruh dataset, sebuah skrip Python digunakan untuk memanggil SplitCap pada setiap file \texttt{.pcap}, untuk melakukan command \verb|mono ./SplitCap.exe -r [pcap_file_path.pcap] -o [output_dir] -s session -p 500|
+. Perlu dicatat penambahan argumen \texttt{-p 500} yang penting untuk membatasi sesi paralel dan menghindari galat ``Too many open files''.
 
 \subsubsection{Pembersihan Awal (Rule A \& B)}
-Setelah semua \texttt{.pcap} dikonversi menjadi \textit{flow} (total $\sim$310.000), proses pembersihan dua tahap yang diadopsi dari \citep{baek2023preprocessing} diterapkan:
+Setelah seluruh data mentah \texttt{.pcap} dikonversi menjadi \textit{bidirectional flows} (dengan total estimasi awal $\sim$310.000 \textit{flow}), diterapkan proses pembersihan dua tahap yang mengadopsi metodologi dari \citep{baek2023preprocessing}. Tahap ini bertujuan untuk mengeliminasi trafik latar belakang (\textit{background traffic}) dan sesi yang rusak.
+
 \begin{enumerate}
-    \item \textbf{Penghapusan Flow Berbasis Protokol (Rule A):} \textit{Flow} yang menggunakan protokol yang tidak relevan dengan aplikasi pengguna, seperti DNS, NBSS, dan LLMNR, dihapus.
-    \item \textbf{Verifikasi TCP 3-Way Handshake (Rule B):} \textit{Flow} TCP yang tidak memiliki 3-way handshake (SYN, SYN-ACK, ACK) lengkap di awal sesi akan dibuang. Ini memastikan bahwa hanya sesi TCP yang valid dan lengkap yang disimpan. Implementasi spesifiknya adalah menghapus \textit{flow} TCP dengan lebih dari 4 paket di mana paket pertamanya tidak memiliki \textit{flag} SYN.
+    \item \textbf{Penghapusan Flow Berbasis Protokol (Rule A):} 
+    Banyak trafik dalam jaringan yang dihasilkan oleh mekanisme sistem operasi atau manajemen jaringan, bukan oleh interaksi pengguna dengan aplikasi target. Oleh karena itu, \textit{flow} yang teridentifikasi menggunakan protokol administratif seperti DNS, NBSS (NetBIOS), NTP, DHCP, dan LLMNR dihapus dari dataset.
+    
+    \item \textbf{Verifikasi TCP 3-Way Handshake (Rule B):} 
+    Integritas sesi TCP sangat krusial untuk analisis fitur yang akurat. \textit{Flow} yang merupakan pecahan dari sesi sebelumnya atau hasil kesalahan penangkapan paket (\textit{packet capture errors}) sering kali tidak memiliki inisiasi koneksi yang lengkap. 
+    
+    Secara formal, sebuah \textit{flow} TCP ($f$) dianggap valid ($f_{valid}$) jika dan hanya jika paket pertama ($p_1$) dari urutan paket dalam \textit{flow} tersebut memiliki \textit{control flag} SYN aktif, menandakan dimulainya \textit{3-way handshake}. Aturan ini didefinisikan secara matematis pada Persamaan \ref{eq:rule_b}.
+
+    \begin{myequation}{Aturan Validasi TCP Handshake}
+        \label{eq:rule_b}
+        f_{valid} \iff \left( \text{Protocol}(f) = \text{TCP} \implies \text{Flag}(p_1) \in \{\text{SYN}\} \right)
+    \end{myequation}
+
+    Implementasi teknis aturan ini dilakukan dengan memeriksa header paket pertama menggunakan pustaka Scapy; jika sebuah \textit{flow} TCP memiliki lebih dari 4 paket namun paket pertamanya tidak mengandung flag SYN, maka \textit{flow} tersebut diklasifikasikan sebagai \textit{invalid} dan dibuang.
 \end{enumerate}
 
-Setelah penerapan kedua aturan ini, jumlah \textit{flow} berkurang secara signifikan menjadi \textbf{29.195 \textit{flow}}.
+Penerapan kedua aturan ini secara drastis mengurangi \textit{noise} dalam dataset, menyusutkan jumlah sampel dari $\sim$310.000 menjadi \textbf{29.195 \textit{flow}} yang relevan. Alur logika penyaringan Rule A dan Rule B ini diilustrasikan pada Gambar \ref{fig:cleaning_process}.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{assets/pics/cleaning_process.png}
+    \caption{Diagram alir proses pembersihan awal (Rule A dan Rule B) untuk menyeleksi \textit{flow} valid.}
+    \label{fig:cleaning_process}
+\end{figure}
 
 \subsubsection{Penyaringan Tambahan (Rule C)}
-Langkah terakhir adalah penyaringan tambahan yang diimplementasikan oleh \citep{park2024fast} untuk menghilangkan \textit{flow} yang dianggap tidak penting untuk tujuan penelitian. Penyaringan ini (disebut Rule C) secara spesifik mencari dan menghapus \textit{flow} yang memenuhi \textit{semua} kriteria berikut:
-\begin{itemize}
-    \item Protokol adalah \textbf{UDP}.
-    \item Alamat IP tujuan adalah \textbf{\texttt{255.255.255.255}} (broadcast).
-    \item \textit{Payload} spam berisi string \textbf{\texttt{"Beacon\textasciitilde"}} \citep{park2024fast}.
-\end{itemize}
 
-\medskip
-\noindent\textbf{Implementasi Penyaringan (Rule A, B, dan C)} \\
+Tahap akhir adalah penyaringan tambahan yang diimplementasikan oleh \citep{park2024fast}. Penyaringan ini (disebut Rule C) melibatkan penghapusan trafik \textit{broadcast} spesifik yang tidak membawa informasi aplikasi yang berguna. Sebuah \textit{flow} diidentifikasi sebagai \textit{spam beacon} ($f_{spam}$) jika memenuhi konjungsi logika tiga kondisi: protokol UDP, alamat tujuan \textit{broadcast}, dan \textit{payload} berisi string "Beacon", seperti dinyatakan dalam Persamaan \ref{eq:rule_c}.
+
+\begin{myequation}{Identifikasi Spam Beacon}
+        \label{eq:rule_c}
+        f_{spam} \iff 
+        \begin{cases} 
+            \text{Protocol}(f) = \text{UDP} \\
+            \text{DstIP}(f) = \text{255.255.255.255} \\
+            \text{"Beacon\textasciitilde"} \in \text{Payload}(f)
+        \end{cases}
+    \end{myequation}
+
+\textit{Flow} yang memenuhi $f_{spam}$ dibuang. Setelah tahap ini, diperoleh dataset final sejumlah \textbf{13.487 \textit{flow}}. Ketiga penyaringan ini diilustrasikan pada Gambar~\ref{fig:preprocessing_funnel}.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\textwidth]{assets/pics/all_cleaning_process.png}
+    \caption{Diagram alir pra-pemrosesan data, menunjukkan reduksi dari data mentah menjadi dataset final melalui Rule A, B, dan C.}
+    \label{fig:preprocessing_funnel}
+\end{figure}
+
+\subsubsection{Implementasi Penyaringan (Rule A, B, dan C)}
+
 Ketiga aturan penyaringan (A, B, dan C) diimplementasikan dalam satu skrip Python menggunakan Scapy untuk membaca dan menganalisis setiap \textit{flow} \texttt{.pcap} satu per satu. Fungsi inti dari proses validasi ini ditunjukkan pada Kode~\ref{lst:scapy_filtering}.
 
 \begin{listing}[H]
@@ -209,50 +222,7 @@ Solusinya adalah melakukan proses \textit{pick-and-choose} dengan memilih 6 apli
     \item \textbf{BitTorrent} (363 flow): Satu-satunya perwakilan untuk P2P.
 \end{itemize}
 
-Proses \textit{pick-and-choose} ini menghasilkan Dataset v2 dengan total \textbf{10.284 \textit{flow}}. Proses penyaringan ini diimplementasikan dengan skrip Python yang membaca 13.487 \textit{flow} dari direktori sumber dan hanya menyalin \textit{flow} yang termasuk dalam 6 aplikasi target ke direktori tujuan. Logika inti dari skrip penyaringan ditunjukkan pada Kode \ref{lst:filter_v2_pseudo}.
-
-\begin{listing}[H]
-    \setstretch{1}    
-    \begin{algorithmic}[1] % [1] adds line numbers
-        
-        \State $TargetApps \gets \{\text{'Skype'}, \text{'Email'}, \text{'SCP'}, \text{'VOIPBuster'}, \text{'YouTube'}, \text{'BitTorrent'}\}$
-        
-        \State \Comment{Map keyword ke nama aplikasi (Urutan penting: spesifik $\to$ umum)}
-        \State $KeywordMap \gets \textbf{OrderedMap}$
-        \State $KeywordMap.\text{add}(\text{'facebook\_chat'}, \text{'Facebook'})$
-        \State $KeywordMap.\text{add}(\text{'gmail'}, \text{'Gmail'})$
-        \State \dots \Comment{Dan seterusnya sesuai definisi Python}
-        
-        \Statex % Empty line
-
-        \Procedure{FilterDatasetV2}{}
-            \State \Call{CreateDirectory}{$DestDir$}
-            \State $files \gets \Call{ListFiles}{$SourceDir$}$
-            
-            \For{\textbf{each} $filename$ \textbf{in} $files$}
-                \State $lowerName \gets \Call{ToLower}{$filename$}$
-                \State $foundApp \gets \textbf{null}$
-                
-                \State \Comment{Identifikasi aplikasi berdasarkan keyword}
-                \For{$(keyword, appName)$ \textbf{in} $KeywordMap$}
-                    \If{$keyword$ \textbf{in} $lowerName$}
-                        \State $foundApp \gets appName$
-                        \State \textbf{break} \Comment{Berhenti pada kecocokan pertama}
-                    \EndIf
-                \EndFor
-                
-                \State \Comment{Salin file jika aplikasi termasuk dalam target}
-                \If{$foundApp \neq \textbf{null}$ \textbf{and} $foundApp \in TargetApps$}
-                    \State \Call{CopyFilePreserveMetadata}{$filename, SourceDir, DestDir$}
-                \EndIf
-                
-            \EndFor
-        \EndProcedure
-
-    \end{algorithmic}
-        \caption{Penyaringan 13.487 \textit{flow} bersih menjadi Dataset v2 (10.284 \textit{flow}) berdasarkan 6 aplikasi yang telah ditentukan.} 
-    \label{lst:filter_v2_pseudo}
-\end{listing}
+Proses \textit{pick-and-choose} ini menghasilkan Dataset v2 dengan total \textbf{10.284 \textit{flow}}. Proses penyaringan ini diimplementasikan dengan skrip Python yang membaca 13.487 \textit{flow} dari direktori sumber dan hanya menyalin \textit{flow} yang termasuk dalam 6 aplikasi target ke direktori tujuan.
 
 Setelah proses kurasi ini selesai, distribusi kelas pada Dataset v2 (10.284 \textit{flow}) menjadi lebih seimbang, meskipun masih menunjukkan ketidakseimbangan yang wajar, seperti terlihat pada Gambar \ref{fig:v2_dist_after}. Dataset v2 (VPN/Non-VPN) inilah yang digunakan sebagai \textit{full dataset}, selain \textit{VPN Only} dataset yang akan dijelaskan di bagian berikutnya.
 
@@ -300,63 +270,7 @@ Untuk memaksimalkan tumpang tindih ini, 9 aplikasi dipilih:
     \item \textbf{Perwakilan Kategori Wajib:} BitTorrent (363 \textit{flow}), Email (137 \textit{flow})
 \end{itemize}
 
-Berbeda dengan Dataset v2 yang disalin secara fisik, dataset ini difilter secara dinamis saat runtime menggunakan skrip klasifikasi utama. Konfigurasi skrip diatur ke \texttt{EXPERIMENT\_MODE = "VPN\_ONLY"} dan \texttt{TARGET\_APPS} diisi dengan 9 aplikasi yang dipilih, seperti ditunjukkan pada Kode \ref{lst:filter_vpnonly_pseudo}.
-
-\begin{listing}[H]
-    \setstretch{1}    
-    \begin{algorithmic}[1] % [1] adds line numbers
-        
-        \State $TargetApps \gets \{\text{'Skype'}, \text{'Hangout'}, \text{'Facebook'},$
-\Statex \hspace{6.5em} $\text{'BitTorrent'}, \text{'FTP'}, \text{'Email'},$ 
-\Statex \hspace{6.5em} $\text{'YouTube'}, \text{'Spotify'}, \text{'Netflix'}\}$
-        
-        \State \Comment{Map keyword ke nama aplikasi (OrderedMap: Spesifik ke Umum)}
-        \State $KeywordMap \gets \textbf{new OrderedMap}$
-        \State $KeywordMap.\text{add}(\text{'facebook\_chat'}, \text{'Facebook'})$
-        \State $KeywordMap.\text{add}(\text{'hangouts\_video'}, \text{'Hangout'})$
-        \State \dots \Comment{Inisialisasi seluruh keyword mapping}
-        
-        \Statex % Empty line
-
-        \Procedure{FilterVPNOnlyDataset}{}
-            \State \Call{CreateDirectory}{$DestDir$}
-            \State $files \gets \Call{ListFiles}{$SourceDir$}$
-            
-            \For{\textbf{each} $filename$ \textbf{in} $files$}
-                \If{$filename$ does not end with \text{'.pcap'}}
-                    \State \textbf{continue}
-                \EndIf
-
-                \State $lowerName \gets \Call{ToLower}{$filename$}$
-                
-                \State \Comment{Kriteria 1: File harus memiliki prefix 'vpn\_'}
-                \If{\textbf{not} $lowerName.\text{startsWith}(\text{'vpn\_'})$}
-                    \State \textbf{continue}
-                \EndIf
-
-                \State \Comment{Identifikasi aplikasi berdasarkan keyword}
-                \State $foundApp \gets \textbf{null}$
-                \For{$(keyword, appName)$ \textbf{in} $KeywordMap$}
-                    \If{$keyword$ \textbf{in} $lowerName$}
-                        \State $foundApp \gets appName$
-                        \State \textbf{break} \Comment{Ambil kecocokan pertama}
-                    \EndIf
-                \EndFor
-
-                \State \Comment{Kriteria 2: Aplikasi harus termasuk dalam 9 target}
-                \If{$foundApp \neq \textbf{null}$ \textbf{and} $foundApp \in TargetApps$}
-                    \State \Call{CopyFilePreserveMetadata}{$filename, SourceDir, DestDir$}
-                \EndIf
-                
-            \EndFor
-        \EndProcedure
-
-    \end{algorithmic}
-        \caption{Penyaringan dataset VPN-only menjadi 9 aplikasi representatif, mencakup semua 6 kategori aplikasi utama.} 
-    \label{lst:filter_vpnonly_pseudo}
-\end{listing}
-
-Proses penyaringan dinamis ini menghasilkan dataset final ‘Khusus VPN’ yang terdiri dari 2.730 \textit{flow} VPN. Distribusi kelas untuk dataset ini ditunjukkan pada Gambar \ref{fig:vpn_only_dist}.
+Proses penyaringan ini menghasilkan dataset final ‘Khusus VPN’ yang terdiri dari 2.730 \textit{flow} VPN. Distribusi kelas untuk dataset ini ditunjukkan pada Gambar \ref{fig:vpn_only_dist}.
 
 \begin{figure}[H]
     \centering
@@ -416,951 +330,338 @@ Komponen $\alpha$ dirancang untuk menangkap \textbf{pola mikroskopis level-byte}
 
 Literatur telah menunjukkan bahwa meskipun terenkripsi, \textit{raw packet payload} seringkali masih mengandung pola-pola yang dapat dipelajari oleh model \textit{Deep Learning}, khususnya \textit{1D-Convolutional Neural Networks} (1D-CNN) \citep{wang2017end, Lotfollahi2019}. Pola-pola ini dapat berupa artefak dari protokol aplikasi, \textit{padding}, atau tanda tangan (\textit{signature}) unik lainnya yang tidak dihilangkan oleh enkripsi.
 
-Proses untuk menghasilkan vektor fitur $\alpha$ dibagi menjadi dua fase utama, yang diimplementasikan dalam dua skrip Python terpisah: (1) Ekstraksi Data Payload Mentah, dan (2) Pelatihan Encoder dan Generasi Fitur.
+Proses ekstraksi ini terdiri dari dua tahap utama: konstruksi tensor input dan pembelajaran representasi laten menggunakan \textit{Deep Learning}.
 
-\subsubsection{Fase 1: Ekstraksi Data \textit{Raw Payload}}
-\label{ssubsec:alpha_fase1}
+\subsubsection{Representasi Input dan Normalisasi}
+Agar dapat diproses oleh Neural Network, setiap \textit{flow} dikonversi menjadi representasi matriks numerik. Penelitian ini mengambil $N=10$ paket pertama dari setiap \textit{flow}, di mana setiap paket dipotong atau di-\textit{padding} hingga mencapai panjang tetap $L=784$ byte.
 
-Fase pertama, yang diimplementasikan dalam skrip \texttt{alpha\_1.py}, bertanggung jawab untuk mengubah \textit{flow} \texttt{.pcap} bersih (hasil pra-pemrosesan) menjadi format dataset yang siap digunakan oleh CNN. Logika inti dari skrip ini dijelaskan dalam Kode \ref{lst:pseudo_alpha1}.
+Data mentah (\textit{raw bytes}) yang bernilai integer $[0, 255]$ dinormalisasi menjadi bilangan riil $[0.0, 1.0]$ untuk mempercepat konvergensi gradien saat pelatihan. Secara matematis, jika $x_{i,j}$ adalah nilai byte ke-$j$ pada paket ke-$i$, maka nilai input ter-normalisasi $x'_{i,j}$ didefinisikan pada Persamaan \ref{eq:alpha_norm}.
 
-\begin{listing}[H]
-    \setstretch{1}    
-    \begin{algorithmic}[1]
-        \State $N_{pkt}, L_{pay} \gets 10, 784$ \Comment{Konfigurasi dimensi input CNN}
-        
-        \Procedure{ProcessFile}{$filepath$}
-            \State $fname \gets \Call{Basename}{filepath}$
-            \State \Comment{Tentukan Label (App, Category, Binary) dari nama file}
-            \State $labels \gets \Call{MapKeywordToLabel}{fname, KeywordMap}$
-            
-            \State $matrix \gets \Call{Zeros}{N_{pkt}, L_{pay}}$
-            \State $packets \gets \Call{ReadPcap}{filepath}$
-            \State $count \gets 0$
+\begin{myequation}{Normalisasi Input Payload}
+    \label{eq:alpha_norm}
+    x'_{i,j} = \frac{x_{i,j}}{255.0}, \quad \forall i \in [1, N], \forall j \in [1, L]
+\end{myequation}
 
-            \For{\textbf{each} $pkt$ \textbf{in} $packets$}
-                \If{$count \geq N_{pkt}$} \textbf{break} \EndIf
-                
-                \State $payload \gets \Call{GetTCPUDPPayload}{pkt}$
-                \If{$payload$ is empty} \textbf{continue} \EndIf
+Hasil dari tahap ini adalah tensor input $\mathbf{X} \in \mathbb{R}^{N \times L}$ untuk setiap sampel \textit{flow}.
 
-                \State \Comment{Normalisasi byte (0-255) ke float (0.0-1.0) \& potong/padding}
-                \State $normData \gets \Call{NormalizeAndPad}{payload, L_{pay}}$
-                \State $matrix[count] \gets normData$
-                \State $count \gets count + 1$
-            \EndFor
+\subsubsection{Arsitektur 1D-CNN dan Ekstraksi Fitur Laten}
+Untuk mengekstraksi fitur dari data sekuensial ini, digunakan arsitektur \textit{1D-Convolutional Neural Network} (1D-CNN). Model ini dilatih dengan pendekatan \textit{supervised learning} untuk mengklasifikasikan aplikasi (tugas pendahuluan), namun tujuan utamanya adalah melatih lapisan \textit{Dense} internal sebagai feature encoder.
 
-            \Return $(matrix, labels)$ \textbf{if} $count > 0$ \textbf{else} \textbf{null}
-        \EndProcedure
-
-        \Statex 
-
-        \Procedure{MainExtraction}{}
-            \State $files \gets \Call{ListFiles}{SourceDir}$
-            \State $dataList, labelList \gets \textbf{new List}, \textbf{new List}$
-
-            \State \Comment{Eksekusi paralel untuk mempercepat proses IO}
-            \State $results \gets \Call{ParallelExec}{ProcessFile, files}$
-
-            \For{\textbf{each} $res$ \textbf{in} $results$}
-                \If{$res \neq \textbf{null}$}
-                    \State $dataList.\text{add}(res.matrix)$
-                    \State $labelList.\text{add}(res.labels)$
-                \EndIf
-            \EndFor
-
-            \State \Comment{Susun Tensor 3D (Samples, 10, 784) dan simpan}
-            \State $X \gets \Call{Stack}{dataList}$; $Y \gets \Call{DataFrame}{labelList}$
-            \State \Call{SaveNumpy}{X, OutputNpy}; \Call{SaveCSV}{Y, OutputCsv}
-        \EndProcedure
-
-    \end{algorithmic}
-        \caption{Fase 1: Ekstraksi Data Payload Mentah.} 
-    \label{lst:pseudo_alpha1}
-\end{listing}
-
-Implementasi spesifik dari langkah ekstraksi dan normalisasi \textit{payload} ditunjukkan pada Kode \ref{lst:snippet_alpha1}. Bagian ini adalah inti dari skrip \texttt{alpha\_1.py}, di mana setiap byte dinormalisasi menjadi nilai antara 0.0 dan 1.0.
+Arsitektur model dirancang dengan tiga blok konvolusi bertingkat untuk menangkap pola dari level rendah hingga tinggi, diikuti oleh lapisan Dense 128-neuron yang berfungsi sebagai \textit{bottleneck}. Implementasi spesifik arsitektur ini menggunakan Keras ditunjukkan pada Kode \ref{lst:cnn_arch}.
 
 \begin{listing}[H]
 \setstretch{1}
-    \begin{minted}[
-        fontsize=\footnotesize
-    ]{python}
-# Potongan kode dari alpha_1.py
-# (dalam fungsi process_pcap_for_cnn)
-
-def process_pcap_for_cnn(pcap_filepath):
-    try:
-        # ... (kode pengambilan label) ...
-
-        # This will be our (10, 784) array for this one flow
-        flow_data = np.zeros((N_PACKETS, PAYLOAD_LEN), dtype=np.float32)
-
-        packets = rdpcap(pcap_filepath)
-        packet_count = 0
-
-        for pkt in packets:
-            if packet_count >= N_PACKETS:
-                break
-
-            # Find the payload (bytes *after* TCP/UDP header)
-            payload = None
-            if TCP in pkt:
-                payload = bytes(pkt[TCP].payload)
-            elif UDP in pkt:
-                payload = bytes(pkt[UDP].payload)
-            
-            if not payload: # Skip jika tidak ada payload
-                continue
-
-            # This is our (784,) vector for this one packet
-            normalized_payload = np.zeros(PAYLOAD_LEN, dtype=np.float32)
-            copy_len = min(len(payload), PAYLOAD_LEN)
-
-            # Copy data dari byte buffer dan normalisasi (0-255 -> 0.0-1.0)
-            byte_data = np.frombuffer(payload[:copy_len], dtype=np.uint8)
-            normalized_payload[:copy_len] = byte_data.astype(np.float32) / 255.0
-
-            # Add the packet vector to our flow matrix
-            flow_data[packet_count] = normalized_payload
-            packet_count += 1
-        
-        # ... (kode return) ...
-    except Exception as e:
-        return None
-    \end{minted}
-    \captionsetup{font=small}
-    \caption{Potongan kode yang menunjukkan proses normalisasi payload.}
-    \label{lst:snippet_alpha1}
-\end{listing}
-
-Hasil akhir dari fase ini adalah dua file:
-\begin{itemize}
-    \item \texttt{VPNOnly-cnn\_payload\_data.npy}: Sebuah \textit{array} NumPy 3-dimensi dengan bentuk \texttt{(jumlah\_sampel, 10, 784)}.
-    \item \texttt{VPNOnly-cnn\_payload\_labels.csv}: File CSV yang berisi label (filename, aplikasi, kategori) yang sesuai untuk setiap sampel.
-\end{itemize}
-
-\subsubsection{Fase 2: Pelatihan Encoder \& Generasi Fitur}
-\label{ssubsec:alpha_fase2}
-
-Fase kedua, diimplementasikan dalam \texttt{alpha\_2.py}, menggunakan data \texttt{.npy} yang dihasilkan Fase 1 untuk melatih model \textit{Deep Learning} dan mengekstrak fitur $\alpha$. Logika skrip ini diringkas dalam Kode \ref{lst:pseudo_alpha2}.
-
-\begin{listing}[H]
-    \setstretch{1}    
-    \begin{algorithmic}[1]
-        \State $InputShape \gets (10 \times 784, 1)$ \Comment{Input sequence (7840, 1)}
-        \State $FeatureDim \gets 128$ \Comment{Dimensi vektor fitur ($alpha''$)}
-        
-        \Procedure{Build1DCNN}{$numClasses$}
-            \State $model \gets \textbf{new SequentialModel}$
-            
-            \State \Comment{Blok Konvolusi \& Pooling}
-            \State $model.\text{add}(\text{Conv1D}(32, \text{kernel}=7, \text{relu}) \to \text{MaxPool}(4))$
-            \State $model.\text{add}(\text{Conv1D}(64, \text{kernel}=5, \text{relu}) \to \text{MaxPool}(4))$
-            \State $model.\text{add}(\text{Conv1D}(128, \text{kernel}=3, \text{relu}) \to \text{MaxPool}(4))$
-            
-            \State $model.\text{add}(\text{Flatten})$
-            \State \Comment{Layer Encoder (Tempat ekstraksi fitur)}
-            \State $model.\text{add}(\text{Dense}(FeatureDim, \text{relu}, name=\text{'encoder'}))$
-            \State $model.\text{add}(\text{Dropout}(0.5))$
-            
-            \State $model.\text{add}(\text{Dense}(numClasses, \text{softmax}))$
-            \State $model.\text{compile}(\text{optimizer='adam'}, \text{loss='categorical'})$
-            \Return $model$
-        \EndProcedure
-
-        \Statex
-
-        \Procedure{TrainAndExtractFeatures}{}
-            \State \Comment{Muat data \& Reshape menjadi time-series 1D}
-            \State $X \gets \Call{LoadNpy}{DataFile}.\text{reshape}(-1, InputShape)$
-            \State $df_{labels} \gets \Call{LoadCSV}{LabelsFile}$
-            \State $Y \gets \Call{OneHotEncode}{df_{labels}.\text{application}}$
-            
-            \State \Comment{Split Data (Train: 80\%, Val: 20\%)}
-            \State $X_{tr}, X_{val}, Y_{tr}, Y_{val} \gets \Call{TrainTestSplit}{X, Y, 0.2}$
-            
-            \State $model \gets \Call{Build1DCNN}{Y.\text{uniqueClasses}}$
-            
-            \State \Comment{Latih model dengan Early Stopping}
-            \State $model.\text{fit}(X_{tr}, Y_{tr}, \text{validation}=(X_{val}, Y_{val}), \text{patience}=10)$
-            
-            \State \Comment{Buat model baru hanya sampai layer 'encoder'}
-            \State $encoder \gets \text{Model}(inputs=model.input, outputs=model.\text{getLayer}(\text{'encoder'}))$
-            \State \Call{SaveModel}{encoder, OutputModelFile}
-            
-            \State \Comment{Ekstrak fitur $\alpha$ dari seluruh dataset}
-            \State $features \gets encoder.\text{predict}(X)$ \Comment{Output shape: (N, 128)}
-            
-            \State \Comment{Gabungkan filename dengan fitur baru dan simpan}
-            \State $finalData \gets \Call{Concat}{df_{labels}.\text{filename}, features}$
-            \State \Call{SaveCSV}{finalData, OutputAlphaV3File}
-        \EndProcedure
-
-    \end{algorithmic}
-        \caption{Fase 2: Pelatihan Encoder dan Generasi Fitur $\alpha$.} 
-    \label{lst:pseudo_alpha2}
-\end{listing}
-
-Seperti dijelaskan dalam pseudocode, sebuah model 1D-CNN dibangun (Kode \ref{lst:snippet_alpha2}). Tujuan utamanya adalah untuk melatih lapisan \textit{Dense} (neuron=128) agar menjadi ekstraktor fitur yang baik. Lapisan ini diberi nama "encoder\_output" agar dapat diekstraksi dengan mudah setelah pelatihan.
-
-\begin{listing}[H]
-\setstretch{1}
-    \begin{minted}[
-        fontsize=\footnotesize
-    ]{python}
-# Potongan kode dari alpha_2.py
-# (Fungsi build_model)
-
-def build_model(num_classes):
-    print("Building 1D-CNN model...")
-
-    input_layer = Input(shape=INPUT_SHAPE) # INPUT_SHAPE = (7840, 1)
-
-    # Convolutional Block 1
-    x = Conv1D(filters=32, kernel_size=7, activation='relu', padding='same')(input_layer)
+    \begin{minted}[fontsize=\footnotesize]{python}
+def build_encoder_model(input_shape, num_classes):
+    inputs = Input(shape=input_shape) # (7840, 1) after flatten
+    
+    # Block 1: Low-level patterns
+    x = Conv1D(32, kernel_size=7, activation='relu', padding='same')(inputs)
     x = MaxPooling1D(pool_size=4)(x)
 
-    # Convolutional Block 2
-    x = Conv1D(filters=64, kernel_size=5, activation='relu', padding='same')(x)
+    # Block 2: Mid-level patterns
+    x = Conv1D(64, kernel_size=5, activation='relu', padding='same')(x)
     x = MaxPooling1D(pool_size=4)(x)
 
-    # Convolutional Block 3
-    x = Conv1D(filters=128, kernel_size=3, activation='relu', padding='same')(x)
+    # Block 3: High-level complex patterns
+    x = Conv1D(128, kernel_size=3, activation='relu', padding='same')(x)
     x = MaxPooling1D(pool_size=4)(x)
 
     x = Flatten()(x)
-
-    # --- This is our Feature Vector ---
-    # We give it a name so we can easily extract it later
-    x = Dense(FEATURE_VECTOR_SIZE, activation='relu', name="encoder_output")(x)
-    x = Dropout(0.5)(x)
-    # ----------------------------------
-
-    # Output classifier layer (Hanya untuk pelatihan)
-    output_layer = Dense(num_classes, activation='softmax', name="classifier_output")(x)
-
-    # Create the full model
-    model = Model(inputs=input_layer, outputs=output_layer)
     
-    # ... (kode compile) ...
-    return model
+    # --- The Encoder Layer (Feature Alpha) ---
+    # Layer ini diberi nama agar output-nya bisa diekstrak
+    features = Dense(128, activation='relu', name="encoder_output")(x)
+    
+    # Classifier Head (Dibuang setelah training)
+    x = Dropout(0.5)(features)
+    outputs = Dense(num_classes, activation='softmax')(x)
+    
+    return Model(inputs, outputs)
     \end{minted}
     \captionsetup{font=small}
-    \caption{Potongan kode dari \texttt{alpha\_2.py} menunjukkan arsitektur 1D-CNN.}
-    \label{lst:snippet_alpha2}
+    \caption{Implementasi arsitektur 1D-CNN untuk mempelajari representasi fitur $\alpha$.}
+    \label{lst:cnn_arch}
 \end{listing}
 
-Model \textit{lengkap} dilatih pada 80\% data untuk mengklasifikasikan \textbf{aplikasi}. Dengan "memaksa" model membedakan 'Skype' dari 'Netflix', lapisan "encoder\_output" (Dense 128) belajar menghasilkan representasi vektor 128-dimensi yang informatif.
+Setelah model dilatih hingga konvergen, lapisan klasifikasi akhir (\textit{Softmax}) dibuang. Model yang tersisa berfungsi sebagai fungsi pemetaan non-linear $f_{enc}(\cdot)$ yang mentransformasi tensor input mentah menjadi vektor fitur $\mathbf{v}_{\alpha}$ berdimensi 128, seperti dinyatakan dalam Persamaan \ref{eq:alpha_vector}.
 
-Setelah pelatihan selesai, bagian \textit{classifier} dibuang, dan model \textit{encoder} yang sudah "pintar" ini digunakan untuk memprediksi \textit{seluruh} dataset. Proses ekstraksi ini ditunjukkan pada Kode \ref{lst:snippet_alpha3}.
+\begin{myequation}{Ekstraksi Vektor Fitur Alpha}
+    \label{eq:alpha_vector}
+    \mathbf{v}_{\alpha} = f_{enc}(\mathbf{X}; \theta_{trained}) \in \mathbb{R}^{128}
+\end{myequation}
 
-\begin{listing}[H]
-\setstretch{1}
-    \begin{minted}[
-        fontsize=\footnotesize
-    ]{python}
-# Potongan kode dari alpha_2.py
-# (dari fungsi main)
-
-    # ... (Kode memuat data dan melatih 'model') ...
-
-    print("Extracting and saving the encoder model...")
-
-    # 4. Buat model encoder baru dengan "memotong" model yang sudah dilatih
-    encoder_model = Model(
-        inputs=model.input,
-        outputs=model.get_layer("encoder_output").output
-    )
-
-    encoder_model.save(OUTPUT_ENCODER_MODEL_FILE)
-
-    # 5. Gunakan encoder untuk mengekstrak fitur dari *seluruh* dataset
-    print(f"Generating {FEATURE_VECTOR_SIZE}-dim features for all {X_full.shape[0]} samples...")
-    alpha_prime_prime_features = encoder_model.predict(X_full, batch_size=128)
-
-    # ... (Kode menyimpan 'alpha_prime_prime_features' ke CSV) ...
-    \end{minted}
-    \captionsetup{font=small}
-    \caption{Potongan kode yang menunjukkan proses ekstraksi fitur $\alpha$.}
-    \label{lst:snippet_alpha3}
-\end{listing}
-
-Hasil dari Fase 2 adalah \textit{array} 2D \texttt{(jumlah\_sampel, 128)}. Ini adalah \textbf{komponen fitur $\alpha$} final, yang kemudian disimpan ke file CSV untuk digabungkan dengan komponen $\beta$ dan $\gamma$. Ilsutrasi dari proses yang dilakukan pada tahap ini terlihat pada Gambar \ref{fig:alpha_extraction_vertical}
+Dimana $\theta_{trained}$ adalah parameter bobot CNN yang telah optimal. Ilustrasi proses transformasi dari paket mentah menjadi vektor fitur ini dapat dilihat pada Gambar \ref{fig:cnn_architecture}.
 
 \begin{figure}[H]
     \centering
-    \begin{tikzpicture}[
-        % Use 'positioning' library logic
-        node distance=0.8cm and 1cm, 
-        % Global styles
-        font=\small,
-        >=Stealth,
-        % Node Styles
-        block/.style = {
-            rectangle, draw, thick, fill=blue!10,
-            text width=11em, text centered, rounded corners,
-            minimum height=3em, drop shadow
-        },
-        data_node/.style = {
-            cylinder, draw, thick, fill=orange!10,
-            shape aspect=0.25, minimum height=3em, text centered,
-            text width=10em, drop shadow
-        },
-        label_node/.style = {
-            cylinder, draw, thick, fill=green!10, shape aspect=0.25,
-            minimum height=2.5em, text centered, text width=9em, 
-            drop shadow
-        },
-        note/.style = {
-            text width=12em, align=center, font=\scriptsize, color=black!80
-        },
-        arrow/.style = {
-            thick, ->
-        }
-    ]
-        
-        % --- 1. START: PCAP ---
-        \node (pcap) [data_node] {Flow .pcap Bersih\\ \scriptsize (dari Pra-Pemrosesan)};
-        
-        % --- 2. STEP 1 ---
-        \node (step1) [block, below=of pcap] {\textbf{Fase 1: Ekstraksi Payload} \\ \texttt{(...1.py)}};
-        \node (step1_note) [note, below=0.0cm of step1] {10 pkt $\times$ 784 byte.\\Normalisasi 0.0-1.0.};
-        
-        % --- 3. RAW PAYLOAD ---
-        \node (npy) [data_node, below=of step1_note] {Data Payload Mentah};
-        \node (npy_note) [note, below=0.0cm of npy] {Bentuk: (N, 7840, 1)};
-
-        % --- 4. MODEL CONTAINER (Outer Box) ---
-        % FIX: Increased height to 8cm so the Softmax layer stays strictly inside
-        \node (model) [block, fill=red!5, below=1.2cm of npy_note, text width=14em, minimum height=8cm] {};
-        
-        % Title
-        \node [below=0.2cm, align=center] at (model.north) {\textbf{Fase 2: Arsitektur 1D-CNN} \\ \texttt{(...2.py)}};
-
-        % --- INTERNAL LAYERS ---
-        % Adjusted spacing so they flow nicely inside the taller box
-        \node (conv) [rectangle, draw, fill=white, text width=10em, text centered, minimum height=2em, drop shadow, below=1.5cm of model.north] {Blok Konvolusi\\(Conv/Pool)};
-        
-        \node (encoder) [rectangle, draw, fill=yellow!20, text width=10em, text centered, minimum height=2em, drop shadow, below=0.8cm of conv] {Lapisan Encoder\\(Dense 128)};
-        
-        \node (classifier) [rectangle, draw, fill=white, text width=10em, text centered, minimum height=2em, drop shadow, below=0.8cm of encoder] {Lapisan Klasifikasi\\(Softmax)};
-        
-        % --- 5. SIDE INPUT (LABELS) ---
-        % FIX: Moved 'right=4.5cm' to create a long arrow, solving the text overlap
-        \node (labels) [label_node, right=4.5cm of model.north east, anchor=center, yshift=-2.5cm] {Label Aplikasi};
-        \node (labels_note) [note, below=0.1cm of labels] {(Mis: 'Skype')};
-
-        % --- 6. OUTPUT ---
-        % Moved alpha down significantly to allow room for the long arrow text
-        \node (alpha) [data_node, fill=yellow!20, below=2cm of model] {Komponen Fitur $\alpha$};
-        \node (alpha_note) [note, below=0.0cm of alpha] {Bentuk: (N, 128)};
-
-        % --- ARROWS ---
-        \draw [arrow] (pcap) -- (step1);
-        \draw [arrow] (step1) -- (step1_note) -- (npy);
-        \draw [arrow] (npy_note) -- node[left, font=\scriptsize, align=right] {(Data Latih)} (model);
-        
-        % FIX: Arrow goes straight horizontal to the model edge
-        \draw [arrow] (labels.west) -- node[above, font=\scriptsize] {(Target)} (labels.west -| model.east);
-
-        % Output arrow
-        \draw [arrow, line width=1.5pt] (model.south) -- node[midway, right, align=left, font=\scriptsize, text width=15em, xshift=0.2cm] {Generasi Fitur \texttt{.predict()} dari \textbf{encoder}} (alpha);
-
-    \end{tikzpicture}
-    \caption{Diagram alir proses ekstraksi komponen fitur $\alpha$ (alpha). Data payload mentah diekstrak dari \texttt{.pcap} (Fase 1), kemudian sebuah 1D-CNN dilatih untuk mengklasifikasikan aplikasi. Lapisan \textit{encoder} (Dense 128) dari model yang telah dilatih kemudian digunakan untuk menghasilkan vektor fitur $\alpha$ akhir.}
-    \label{fig:alpha_extraction_vertical}
+    \includegraphics[width=1.0\textwidth]{assets/pics/cnn_architecture_genai.png}
+    \caption{Visualisasi pipeline ekstraksi fitur $\alpha$: dari matriks \textit{payload} mentah, melalui lapisan konvolusi, hingga menjadi vektor laten 128-dimensi.}
+    \label{fig:cnn_architecture}
 \end{figure}
 
 \subsection{Komponen \texorpdfstring{$\beta$}{beta}: Statistik Level Flow}
 \label{subsec:komponen_beta}
 
-Komponen $\beta$ dirancang untuk menangkap \textbf{pola makroskopis} dari keseluruhan \textit{flow} jaringan. Komponen ini didasarkan pada hipotesis bahwa bahkan ketika \textit{payload} dienkripsi, karakteristik perilaku statistik dari aliran---seperti seberapa sering, seberapa besar, dan kapan paket dikirim---dapat mengungkapkan informasi penting tentang aplikasi yang mendasarinya \citep{DraperGil2016}.
+Komponen $\beta$ (Beta) dirancang untuk menangkap \textbf{pola makroskopis} dari keseluruhan \textit{flow} jaringan. Komponen ini didasarkan pada premis bahwa meskipun konten paket dienkripsi, karakteristik perilaku statistik---seperti distribusi ukuran paket dan ritme waktu kedatangan---tetap dapat diobservasi dan membentuk \textit{fingerprint} yang unik untuk setiap aplikasi \citep{DraperGil2016}.
 
-Implementasi ekstraksi fitur $\beta$ dilakukan oleh skrip \texttt{v2\_beta.py}. Logika inti dari skrip ini diringkas dalam Pseudocode \ref{lst:pseudo_beta}.
+Berbeda dengan pendekatan naif yang hanya menghitung statistik global, penelitian ini menerapkan analisis bidireksional yang memisahkan trafik menjadi dua arah: \textit{Client-to-Server} (C2S) dan \textit{Server-to-Client} (S2C).
 
-\begin{listing}[H]
-\setstretch{1}
-\begin{algorithm}[H]
-\begin{algorithmic}[1]
-    \State \textbf{Input:} FLOW\_DIR (direktori .pcap)
-    \State \textbf{Output:} OUTPUT\_CSV (file .csv berisi fitur beta)
-    \item[]
-    \Function{ProcessPcap}{file}
-        \State $(app, cat, type) \gets \Call{GetFlowLabels}{file}$
-        \If{$app = null$} \Return $null$ \EndIf
-        \State $packets \gets \Call{BacaPcap}{file}$
-        \State $clientIP \gets \Call{GetSourceIP}{packets[0]}$
-        \State $(sizesC2S, timesC2S) \gets \Call{GetPackets}{packets, clientIP, arahC2S}$
-        \State $(sizesS2C, timesS2C) \gets \Call{GetPackets}{packets, clientIP, arahS2C}$
-        \State $iatsC2S \gets \Call{HitungSelisih}{timesC2S}$
-        \State $iatsS2C \gets \Call{HitungSelisih}{timesS2C}$
-        \State $fitur \gets \{\}$
-        \State $stats1 \gets \Call{CalcStats}{sizesC2S}$
-        \State $stats2 \gets \Call{CalcStats}{sizesS2C}$
-        \State $stats3 \gets \Call{CalcStats}{iatsC2S}$
-        \State $stats4 \gets \Call{CalcStats}{iatsS2C}$
-        \State $stats5 \gets \Call{HitungFiturFlow}{timesC2S, timesS2C}$
-        \State $fitur \gets \Call{Gabung}{stats1, stats2, stats3, stats4, stats5}$
-        \State \Return $(app, cat, type, fitur)$
-    \EndFunction
-    \item[]
-    \Procedure{Main}{}
-        \State $files \gets \Call{GetAllPcap}{FLOW\_DIR}$
-        \State $hasil \gets \Call{JalankanParalel}{ProcessPcap, files}$
-        \State $df \gets \Call{ToDataFrame}{hasil}$
-        \State \Call{SimpanCsv}{df, outputFile}
-    \EndProcedure
-\end{algorithmic}
-\end{algorithm}
-\captionsetup{font=small}
-\caption{Pseudocode untuk Ekstraksi Komponen $\beta$ (Statistik Level Flow).}
-\label{lst:pseudo_beta}
-\end{listing}
+\subsubsection{Ekstraksi Atribut Bidireksional}
+Untuk setiap \textit{flow} $f$, paket-paket dipisahkan berdasarkan arah alirannya. Dari pemisahan ini, diekstraksi empat sekuens data utama: Ukuran Paket ($Z$) dan \textit{Inter-Arrival Time} ($I$) untuk kedua arah.
 
-Kunci dari komponen $\beta$ adalah analisis \textbf{bidireksional}. Untuk setiap \textit{flow}, skrip terlebih dahulu mengidentifikasi IP klien (diasumsikan sebagai IP sumber dari paket pertama), seperti terlihat pada Kode \ref{lst:snippet_beta1}.
+Secara formal, jika $P_{c2s}$ dan $P_{s2c}$ adalah himpunan paket pada arah keluar dan masuk, maka himpunan observasi didefinisikan sebagai:
+\begin{align*}
+    \mathbf{Z}^{c2s} &= \{ \text{Size}(p) \mid p \in P_{c2s} \} \\
+    \mathbf{I}^{c2s} &= \{ t_{k+1} - t_k \mid p_k, p_{k+1} \in P_{c2s} \}
+\end{align*}
+Definisi serupa berlaku untuk arah S2C ($\mathbf{Z}^{s2c}$ dan $\mathbf{I}^{s2c}$).
 
-\begin{listing}[H]
-\setstretch{1}
-    \begin{minted}[
-        fontsize=\footnotesize
-    ]{python}
-# Potongan kode dari v2_beta.py
-# (dalam fungsi process_pcap_file)
+\subsubsection{Konstruksi Vektor Fitur Statistik}
+Untuk mengubah sekuens data yang panjangnya bervariasi menjadi vektor fitur berdimensi tetap, diterapkan fungsi pemetaan statistik $\mathcal{F}: \mathbb{R}^n \to \mathbb{R}^9$. Fungsi ini menghitung 9 statistik deskriptif untuk setiap himpunan data: \textit{Count, Sum, Mean, Standard Deviation, Min, Max, Median, Skewness,} dan \textit{Kurtosis}.
 
-    # ... (kode inisialisasi list) ...
-    try:
-        packets = rdpcap(filepath)
+Vektor fitur $\mathbf{v}_{\beta}$ kemudian dikonstruksi dengan menggabungkan (konkatenasi) hasil statistik dari keempat himpunan data tersebut, ditambah dengan statistik global \textit{flow} (Durasi, Total Paket, Total Volume). Definisi formal vektor $\mathbf{v}_{\beta}$ dinyatakan dalam Persamaan \ref{eq:beta_vector}.
 
-        client_ip = None
-        for pkt in packets:
-            if IP in pkt:
-                client_ip = pkt[IP].src
-                break
+\begin{myequation}{Konstruksi Vektor Fitur Beta}
+    \label{eq:beta_vector}
+    \mathbf{v}_{\beta} = \left[ \mathcal{F}(\mathbf{Z}^{c2s}) \oplus \mathcal{F}(\mathbf{Z}^{s2c}) \oplus \mathcal{F}(\mathbf{I}^{c2s}) \oplus \mathcal{F}(\mathbf{I}^{s2c}) \oplus \mathbf{v}_{global} \right]
+\end{myequation}
 
-        if client_ip is None:
-            return None # Skip non-IP flows
-        # ...
-    \end{minted}
-    \captionsetup{font=small}
-    \caption{Potongan kode dari \texttt{v2\_beta.py} menunjukkan identifikasi IP klien.}
-    \label{lst:snippet_beta1}
-\end{listing}
+Dimana $\oplus$ adalah operasi konkatenasi. Dengan 9 statistik untuk 4 himpunan data ($9 \times 4 = 36$) ditambah 3 fitur global, total dimensi vektor $\mathbf{v}_{\beta}$ adalah \textbf{39 fitur}.
 
-Setelah IP klien diketahui, skrip melakukan iterasi kedua melalui semua paket untuk memisahkan ukuran dan waktu kedatangan paket ke dalam empat daftar terpisah:
-\begin{itemize}
-    \item \texttt{c2s\_sizes}: Ukuran paket dari Klien ke Server.
-    \item \texttt{c2s\_times}: Waktu kedatangan paket dari Klien ke Server.
-    \item \texttt{s2c\_sizes}: Ukuran paket dari Server ke Klien.
-    \item \texttt{s2c\_times}: Waktu kedatangan paket dari Server ke Klien.
-\end{itemize}
+Visualisasi proses ekstraksi statistik bidireksional ini dapat dilihat pada Gambar \ref{fig:beta_extraction}.
 
-Selanjutnya, waktu kedatangan (misalnya \texttt{c2s\_times}) digunakan untuk menghitung \textit{Inter-Arrival Times} (IAT) untuk setiap arah. Kode \ref{lst:snippet_beta2} menunjukkan bagaimana daftar IAT ini dihitung menggunakan fungsi \texttt{np.diff}.
-
-\begin{listing}[H]
-\setstretch{1}
-    \begin{minted}[
-        fontsize=\footnotesize
-    ]{python}
-# Potongan kode dari v2_beta.py
-# (dalam fungsi process_pcap_file)
-
-    # ... (kode ekstraksi paket bidireksional) ...
-
-    # 5. Calculate Inter-Arrival Times (IATs)
-    # np.diff computes the difference between consecutive elements
-    c2s_iats = np.diff(c2s_times).tolist()
-    s2c_iats = np.diff(s2c_times).tolist()
-
-    # 6. Calculate all statistical features
-    features = {}
-    # ...
-    \end{minted}
-    \captionsetup{font=small}
-    \caption{Potongan kode dari \texttt{v2\_beta.py} menunjukkan kalkulasi IAT bidireksional.}
-    \label{lst:snippet_beta2}
-\end{listing}
-
-Terakhir, fungsi utilitas \texttt{calculate\_stats} (ditampilkan dalam Kode \ref{lst:snippet_beta3}) dipanggil pada keempat daftar ini (\texttt{c2s\_sizes}, \texttt{s2c\_sizes}, \texttt{c2s\_iats}, \texttt{s2c\_iats}).
-
-\begin{listing}[H]
-\setstretch{1}
-    \begin{minted}[
-        fontsize=\footnotesize
-    ]{python}
-# Potongan kode dari v2_beta.py
-# (Fungsi calculate_stats)
-
-def calculate_stats(data_list, prefix):
-    """
-    Calculates a full statistical profile for a list of numbers.
-    Returns a dictionary of features.
-    """
-    stats = {}
-
-    # Ensure all keys exist, even if they are 0
-    stat_names = ['count', 'sum', 'mean', 'std', 'min', 'max', 'median', 'p25', 'p75']
-    for name in stat_names:
-        stats[f"{prefix}_{name}"] = 0.0
-
-    if not data_list:
-        return stats # Return all zeros
-
-    arr = np.array(data_list)
-
-    stats[f"{prefix}_count"] = float(arr.size)
-    stats[f"{prefix}_sum"] = float(np.sum(arr))
-    stats[f"{prefix}_mean"] = float(np.mean(arr))
-    stats[f"{prefix}_min"] = float(np.min(arr))
-    stats[f"{prefix}_max"] = float(np.max(arr))
-    stats[f"{prefix}_median"] = float(np.median(arr))
-
-    # Percentiles
-    stats[f"{prefix}_p25"] = float(np.percentile(arr, 25))
-    stats[f"{prefix}_p75"] = float(np.percentile(arr, 75))
-
-    # Std deviation requires at least 2 samples
-    if arr.size > 1:
-        stats[f"{prefix}_std"] = float(np.std(arr))
-
-    return stats
-    \end{minted}
-    \captionsetup{font=small}
-    \caption{Potongan kode dari \texttt{v2\_beta.py} menunjukkan fungsi utilitas kalkulasi 9 statistik.}
-    \label{lst:snippet_beta3}
-\end{listing}
-
-Fungsi ini menghitung 9 statistik deskriptif: \textit{count} (jumlah), \textit{sum} (total), \textit{mean} (rata-rata), \textit{std} (standar deviasi), \textit{min}, \textit{max}, \textit{median}, \textit{p25} (kuartil 1), dan \textit{p75} (kuartil 3).
-
-Karena 9 statistik ini dihitung untuk 4 daftar yang berbeda (ukuran c2s, ukuran s2c, IAT c2s, IAT s2c), total $9 \times 4 = 36$ fitur statistik bidireksional dihasilkan. Ditambah dengan 3 fitur level \textit{flow} total (durasi, total paket, total volume), komponen $\beta$ akhir terdiri dari \textbf{39 fitur} statistik.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1.0\textwidth]{assets/pics/beta_extraction_genai.png}
+    \caption{Diagram alir ekstraksi fitur $\beta$: Pemisahan trafik bidireksional, perhitungan statistik deskriptif, dan penyusunan vektor fitur 39-dimensi.}
+    \label{fig:beta_extraction}
+\end{figure}
 
 \subsection{Komponen \texorpdfstring{$\gamma$}{gamma}: Statistik Level Burst}
 \label{subsec:komponen_gamma}
 
-Komponen $\gamma$ (gamma) dirancang untuk menangkap \textbf{pola komunikasi \textit{on-off}} dari sebuah aliran. Analisis ini berbeda dari komponen $\beta$, yang melihat aliran sebagai satu kesatuan statistik, dan komponen $\alpha$, yang melihat \textit{payload} mentah. Komponen $\gamma$ berfokus pada ritme komunikasi.
+Komponen $\gamma$ (Gamma) difokuskan untuk menangkap dinamika temporal atau ritme komunikasi dari sebuah aliran. Berbeda dengan komponen $\beta$ yang melihat statistik global, komponen ini membedah struktur \textit{on-off} (kirim-tunggu-kirim) yang menjadi ciri khas aplikasi interaktif seperti VoIP, \textit{messaging}, dan \textit{streaming} adaptif \citep{Lotfollahi2019, Fesl2024}.
 
-Banyak aplikasi, terutama yang bersifat interaktif (seperti \textit{chat} atau VoIP) atau \textit{streaming} (seperti video), tidak mengirimkan data dalam aliran yang konstan. Sebaliknya, mereka mengirimkan sekelompok paket (\textit{burst}) data, diikuti dengan jeda (waktu diam), lalu diikuti dengan \textit{burst} data berikutnya. Menganalisis karakteristik dari \textit{burst} dan jeda ini dapat memberikan sidik jari yang kuat untuk mengidentifikasi jenis aplikasi..
+Analisis ini membagi sebuah \textit{flow} kontinu menjadi segmen-segmen diskrit yang disebut \textit{burst}, dipisahkan oleh periode diam (\textit{idle time}).
 
-\subsubsection{Definisi Burst}
-Kunci dari analisis ini adalah definisi "burst". Dalam penelitian ini, sebuah \textit{burst} didefinisikan sebagai sekelompok paket (satu atau lebih) di mana waktu jeda antar paket tersebut \textbf{kurang dari 1.0 detik}. Jika jeda antar dua paket melebihi ambang batas ini, \textit{burst} sebelumnya dianggap selesai dan \textit{burst} baru dimulai. Nilai ambang batas 1.0 detik ini diatur dalam variabel \texttt{BURST\_IDLE\_THRESHOLD}.
+\subsubsection{Model Matematis Segmentasi Burst}
+Kunci dari ekstraksi fitur ini adalah algoritma segmentasi yang menentukan batas antar \textit{burst}. Penelitian ini mendefinisikan \textit{threshold} waktu diam sebesar $\tau_{idle} = 1.0$ detik \citep{DraperGil2016, Razooqi2025-bo}.
 
-\subsubsection{Implementasi Ekstraksi (gamma.py)}
-Ekstraksi fitur $\gamma$ diimplementasikan dalam skrip \texttt{gamma.py}. Berbeda dengan komponen $\beta$, analisis \textit{burst} ini bersifat \textbf{unidireksional} dalam arti menggabungkan paket dari kedua arah (Klien $\leftrightarrow$ Server) menjadi satu urutan waktu sebelum diproses.
+Secara formal, misalkan sebuah \textit{flow} $F$ terdiri dari urutan paket dengan waktu kedatangan $T = \{t_1, t_2, \dots, t_n\}$. Sebuah sub-sekuens paket $B_k = \{p_i, p_{i+1}, \dots, p_j\}$ didefinisikan sebagai satu \textit{burst} ke-$k$ jika dan hanya jika memenuhi kondisi batas dan kontinuitas pada Persamaan \ref{eq:burst_segmentation}.
 
-Logika inti dari skrip ini diringkas dalam Kode \ref{lst:pseudo_gamma}.
+\begin{myequation}{Kriteria Segmentasi Burst}
+    \label{eq:burst_segmentation}
+    B_k \iff 
+    \begin{cases} 
+    t_{m+1} - t_m < \tau_{idle}, & \forall m \in [i, j-1] \quad (\text{Kontinuitas}) \\
+    t_{i} - t_{i-1} \ge \tau_{idle} & (\text{Batas Awal}, \text{ jika } i > 1) \\
+    t_{j+1} - t_{j} \ge \tau_{idle} & (\text{Batas Akhir}, \text{ jika } j < n)
+    \end{cases}
+\end{myequation}
 
-\begin{listing}[H]
-\setstretch{1}
-\begin{algorithm}[H]
-\begin{algorithmic}[1]
-    \State \textbf{Definisi:} THRESHOLD $\gets 1.0$ (detik)
-    \State \textbf{Input:} file (.pcap)
-    \State \textbf{Output:} fitur\_gamma (37 fitur statistik burst)
-    \item[]
-    \Function{DeteksiBurst}{file}
-        \State $packets \gets \Call{GetAllPacketsSorted}{file}$
-        \State $(counts, volumes, durations, idles) \gets ([], [], [], [])$
-        \State $(firstTime, firstSize) \gets packets[0]$
-        \State $(burstCount, burstVolume, burstStart, lastTime) \gets (1, firstSize, firstTime, firstTime)$
-        \For{each $(t, s)$ in $packets[1...]$}
-            \State $idle \gets t - lastTime$
-            \If{$idle < THRESHOLD$}
-                \State $burstCount \gets burstCount + 1$
-                \State $burstVolume \gets burstVolume + s$
-            \Else
-                \State \Call{Append}{durations, $lastTime - burstStart$}
-                \State \Call{Append}{counts, burstCount}
-                \State \Call{Append}{volumes, burstVolume}
-                \State \Call{Append}{idles, idle}
-                \State $(burstCount, burstVolume, burstStart) \gets (1, s, t)$
-            \EndIf
-            \State $lastTime \gets t$
-        \EndFor
-        \State \Call{Append}{durations, $lastTime - burstStart$}
-        \State \Call{Append}{counts, burstCount}
-        \State \Call{Append}{volumes, burstVolume}
-        \State $fitur \gets \{\}$
-        \State $fitur[\text{totalBurst}] \gets \Call{Length}{counts}$
-        \State $s1 \gets \Call{CalcStats}{counts}$
-        \State $s2 \gets \Call{CalcStats}{volumes}$
-        \State $s3 \gets \Call{CalcStats}{durations}$
-        \State $s4 \gets \Call{CalcStats}{idles}$
-        \State $fitur \gets \Call{Gabung}{fitur, s1, s2, s3, s4}$
-        \State \Return $fitur$
-    \EndFunction
-\end{algorithmic}
-\end{algorithm}
-\captionsetup{font=small}
-\caption{Pseudocode untuk Ekstraksi Komponen $\gamma$ (Statistik Level Burst).}
-\label{lst:pseudo_gamma}
-\end{listing}
+Persamaan ini menyatakan bahwa paket-paket dalam satu \textit{burst} harus memiliki jarak waktu yang rapat ($< 1.0$s), dan terpisah dari \textit{burst} lain oleh jeda yang signifikan ($\ge 1.0$s). Ilustrasi visual dari logika segmentasi ini ditampilkan pada Gambar \ref{fig:burst_logic}.
 
-Kode \ref{lst:snippet_gamma1} menunjukkan logika inti dari algoritma deteksi \textit{burst} ini. Skrip mengiterasi setiap paket (mulai dari paket kedua) dan menghitung \texttt{idle\_time} (waktu jeda) dari paket sebelumnya.
+\begin{figure}[H]
+    \centering
+    
+    \includegraphics[width=1.0\textwidth]{assets/pics/burst_logic_genai.png}
+    \caption{Visualisasi segmentasi \textit{burst}: Paket-paket dikelompokkan berdasarkan kedekatan waktu kedatangan (IAT < 1.0s) dan dipisahkan oleh \textit{idle time}.}
+    \label{fig:burst_logic}
+\end{figure}
 
-\begin{listing}[H]
-\setstretch{1}
-    \begin{minted}[
-        fontsize=\footnotesize
-    ]{python}
-# Potongan kode dari gamma.py
-# (dalam fungsi process_pcap_file)
+\subsubsection{Ekstraksi Fitur Statistik Burst}
+Setelah \textit{flow} disegmentasi menjadi himpunan \textit{burst} $\mathbf{B} = \{B_1, B_2, \dots, B_m\}$, empat variabel utama diekstraksi dari setiap \textit{burst}:
+\begin{enumerate}
+    \item \textbf{Packet Count ($C$):} Jumlah paket dalam setiap \textit{burst}.
+    \item \textbf{Volume ($V$):} Total \textit{byte} yang dikirim dalam setiap \textit{burst}.
+    \item \textbf{Duration ($D$):} Lama waktu aktif setiap \textit{burst} ($t_{akhir} - t_{awal}$).
+    \item \textbf{Idle Time ($I$):} Durasi jeda sebelum \textit{burst} berikutnya dimulai.
+\end{enumerate}
 
-    # ... (kode inisialisasi burst pertama) ...
-    last_packet_time = all_packets[0][0]
+Sama seperti komponen $\beta$, fungsi statistik $\mathcal{F}$ diterapkan pada keempat himpunan nilai ini untuk menghasilkan vektor fitur statistik. Vektor fitur $\mathbf{v}_{\gamma}$ dikonstruksi sesuai Persamaan \ref{eq:gamma_vector}.
 
-    # Iterate from the *second* packet onwards
-    for (pkt_time, pkt_size) in all_packets[1:]:
-        idle_time = pkt_time - last_packet_time
+\begin{myequation}{Konstruksi Vektor Fitur Gamma}
+    \label{eq:gamma_vector}
+    \mathbf{v}_{\gamma} = \left[ m, \mathcal{F}(\mathbf{C}), \mathcal{F}(\mathbf{V}), \mathcal{F}(\mathbf{D}), \mathcal{F}(\mathbf{I}) \right]
+\end{myequation}
 
-        if idle_time < BURST_IDLE_THRESHOLD:
-            # --- This packet is PART of the current burst ---
-            current_burst_packets += 1
-            current_burst_volume += pkt_size
-        else:
-            # --- This packet is the START of a new burst ---
-            # 1. Save the previous burst
-            burst_duration = last_packet_time - current_burst_start_time
-            burst_packet_counts.append(current_burst_packets)
-            burst_volumes.append(current_burst_volume)
-            burst_durations.append(burst_duration)
-
-            # 2. Save the idle time that just ended
-            burst_idle_times.append(idle_time)
-
-            # 3. Reset for the new burst
-            current_burst_packets = 1
-            current_burst_volume = pkt_size
-            current_burst_start_time = pkt_time
-
-        # Update the time of the last packet seen
-        last_packet_time = pkt_time
-
-    # 6. Save the *final* burst after the loop
-    burst_duration = last_packet_time - current_burst_start_time
-    # ... (append burst terakhir ke list) ...
-    \end{minted}
-    \captionsetup{font=small}
-    \caption{Potongan kode dari \texttt{gamma.py} menunjukkan logika deteksi batas burst.}
-    \label{lst:snippet_gamma1}
-\end{listing}
-
-Jika \texttt{idle\_time} kurang dari ambang batas (1.0 detik), paket saat ini ditambahkan ke \textit{burst} yang sedang berjalan. Jika tidak, \textit{burst} sebelumnya disimpan, dan \texttt{idle\_time} dicatat sebagai waktu jeda antar-\textit{burst}.
-
-Setelah semua paket diproses, skrip memanggil fungsi \texttt{calculate\_stats} (yang sama dengan yang digunakan pada komponen $\beta$) pada empat daftar yang dihasilkan:
-\begin{itemize}
-    \item \texttt{burst\_packet\_counts}: Daftar jumlah paket untuk setiap burst.
-    \item \texttt{burst\_volumes}: Daftar total volume (byte) untuk setiap burst.
-    \item \texttt{burst\_durations}: Daftar durasi (detik) untuk setiap burst.
-    \item \texttt{burst\_idle\_times}: Daftar waktu jeda (detik) antar burst.
-\end{itemize}
-
-Menghitung 9 statistik (count, mean, std, dll.) untuk 4 daftar ini menghasilkan $9 \times 4 = 36$ fitur. Ditambah dengan satu fitur tambahan, \texttt{total\_burst\_count}, komponen $\gamma$ akhir terdiri dari \textbf{37 fitur} statistik level \textit{burst}.
+Dimana $m$ adalah jumlah total \textit{burst}. Dengan 9 statistik untuk 4 variabel ($9 \times 4 = 36$) ditambah fitur jumlah \textit{burst} ($m$), komponen ini berkontribusi \textbf{37 fitur} pada vektor akhir \citep{kotak2025vpn, Liu2024}.
 
 \subsection{Integrasi Komponen HFV dan Pembuatan Basis Data Fitur}
 \label{subsec:integrasi_hfv}
 
-Setelah ketiga komponen fitur diekstraksi secara terpisah dalam tiga \textit{pipeline} yang independen, langkah terakhir adalah mengintegrasikannya menjadi satu vektor fitur hibrida (HFV) tunggal. Proses ini diimplementasikan dalam skrip \texttt{merge\_hfv.py}.
+Tahap akhir dari rekayasa fitur adalah mengintegrasikan ketiga komponen yang telah diekstraksi secara independen ($\alpha, \beta, \gamma$) menjadi satu representasi vektor tunggal yang holistik. Proses ini dikenal sebagai \textit{Multi-modal Feature Fusion}.
 
-Tujuan dari skrip ini adalah untuk membuat satu basis data (file \texttt{.csv}) di mana setiap baris mewakili satu \textit{flow} yang unik, dan kolom-kolomnya berisi:
-\begin{enumerate}
-    \item Informasi label (misalnya, \texttt{filename}, \texttt{application}, \texttt{category}).
-    \item 128 fitur dari komponen $\alpha$ (pola \textit{byte} 1D-CNN).
-    \item 39 fitur dari komponen $\beta$ (statistik level \textit{flow}).
-    \item 37 fitur dari komponen $\gamma$ (statistik level \textit{burst}).
-\end{enumerate}
+Tujuan integrasi ini adalah menggabungkan kekuatan representasi \textit{deep learning} (pola level-byte) dengan rekayasa fitur statistik (pola level-flow dan level-burst) untuk menciptakan "sidik jari" lalu lintas yang komprehensif.
 
-Penggabungan ini menghasilkan vektor HFV $\Omega$ final dengan total $128 + 39 + 37 = \mathbf{204}$ fitur untuk setiap \textit{flow}.
+\subsubsection{Definisi Vektor Hibrida (Hybrid Flow Vector)}
+Secara formal, untuk setiap \textit{flow} $i$, didefinisikan sebuah vektor fitur hibrida $\Omega_i$ sebagai hasil operasi konkatenasi ($\oplus$) dari tiga sub-vektor komponen. Definisi matematis dan analisis dimensi vektor ini dinyatakan dalam Persamaan \ref{eq:hfv_concat}.
 
-Proses penggabungan ini diringkas dalam Kode \ref{lst:merge_hfv}. Kunci dari proses ini adalah penggunaan \texttt{filename} sebagai \textit{primary key} unik untuk menggabungkan semua \textit{DataFrame} komponen.
+\begin{myequation}{Vektor Hybrid Flow Vector (HFV)}
+    \label{eq:hfv_concat}
+    \Omega = \mathbf{v}_{\alpha} \oplus \mathbf{v}_{\beta} \oplus \mathbf{v}_{\gamma}
+\end{myequation}
 
-\begin{listing}[H]
-\setstretch{1}
-\begin{algorithm}[H]
-\caption{Pseudocode Integrasi Komponen HFV}
-\begin{algorithmic}[1]
-    \State \textbf{Input:}
-    \State \quad $File_{label} \gets$ \texttt{VPNOnly-cnn\_payload\_labels.csv}
-    \State \quad $File_{\alpha} \gets$ \texttt{VPNOnly-alpha\_double\_prime\_component\_v3.csv}
-    \State \quad $File_{\beta} \gets$ \texttt{VPNOnly-delta\_component\_v2.csv}
-    \State \quad $File_{\gamma} \gets$ \texttt{VPNOnly-gamma\_prime\_component\_v2.csv}
-    \State \textbf{Output:} $File_{HFV} \gets$ \texttt{VPNOnly-final\_PESV\_dataset\_v3.csv}
-    
-    \State \Comment{Muat semua komponen ke dalam DataFrame pandas}
-    \State $df_{label} \gets \textbf{load\_csv}(File_{label})$ \Comment{Basis label (9,720 baris)}
-    \State $df_{\alpha} \gets \textbf{load\_csv}(File_{\alpha})$ \Comment{Fitur Alpha (9,720 baris)}
-    \State $df_{\beta} \gets \textbf{load\_csv}(File_{\beta})$ \Comment{Fitur Beta (~10k baris)}
-    \State $df_{\gamma} \gets \textbf{load\_csv}(File_{\gamma})$ \Comment{Fitur Gamma (~10k baris)}
-    
-    \State \Comment{Persiapan merge: Hapus kolom label duplikat dari Beta dan Gamma}
-    \State $cols\_to\_drop \gets$ ['application', 'category', 'binary\_type']
-    \State $df_{\beta\_feat} \gets \textbf{drop\_columns}(df_{\beta}, cols\_to\_drop)$
-    \State $df_{\gamma\_feat} \gets \textbf{drop\_columns}(df_{\gamma}, cols\_to\_drop)$
-    
-    \State \Comment{Lakukan penggabungan inner-join sekuensial}
-    \State $df_{merged} \gets \textbf{merge}(df_{label}, df_{\alpha}, on='filename', how='inner')$
-    \State $df_{merged} \gets \textbf{merge}(df_{merged}, df_{\beta\_feat}, on='filename', how='inner')$
-    \State $df_{final} \gets \textbf{merge}(df_{merged}, df_{\gamma\_feat}, on='filename', how='inner')$
-    
-    \State \Comment{Simpan hasil akhir}
-    \State $\textbf{save\_csv}(df_{final}, File_{HFV})$
-\end{algorithmic}
-\end{algorithm}
-\captionsetup{font=small}
-\caption{Pseudocode Integrasi Komponen HFV}
-\label{lst:merge_hfv}
-\end{listing}
+Dimana dimensi total dari ruang fitur $\Omega$ adalah jumlahan dari dimensi masing-masing komponen:
+\begin{align*}
+    \text{dim}(\Omega) &= \text{dim}(\mathbf{v}_{\alpha}) + \text{dim}(\mathbf{v}_{\beta}) + \text{dim}(\mathbf{v}_{\gamma}) \\
+    &= 128 + 39 + 37 \\
+    &= \mathbf{204} \text{ Fitur}
+\end{align*}
 
-\subsubsection{Implementasi Penggabungan}
-Dalam implementasi \texttt{merge\_hfv.py}, \textit{file} label yang dihasilkan oleh \textit{pipeline} $\alpha$ (\texttt{cnn\_payload\_labels.csv}) sengaja dipilih sebagai basis data utama. Ini karena \textit{pipeline} $\alpha$ (ekstraksi \textit{payload}) adalah yang paling ketat; \textit{flow} yang tidak memiliki \textit{payload} (misalnya, \textit{flow} TCP yang kosong) telah dibuang pada fase tersebut.
+Setiap dimensi dalam vektor $\Omega$ merepresentasikan atribut numerik yang akan menjadi input bagi model klasifikasi.
 
-File komponen $\beta$ dan $\gamma$ mungkin berisi \textit{flow} yang tidak ada di \textit{pipeline} $\alpha$, sehingga mereka juga memuat kolom label mereka sendiri. Untuk mencegah konflik kolom saat penggabungan, kolom-kolom label duplikat ini harus dihapus terlebih dahulu, seperti yang ditunjukkan pada Kode \ref{lst:snippet_merge1}.
+\subsubsection{Konsistensi Dataset dan Integritas Sampel}
+Karena proses ekstraksi dilakukan melalui tiga \textit{pipeline} yang berbeda, integritas data harus dijaga dengan memastikan bahwa hanya \textit{flow} yang valid pada ketiga komponen yang disertakan dalam dataset akhir.
 
-\begin{listing}[H]
-\setstretch{1}
-    \begin{minted}[
-        fontsize=\footnotesize
-    ]{python}
-# Potongan kode dari merge_hfv.py
+Misalkan $S_\alpha, S_\beta,$ dan $S_\gamma$ adalah himpunan identitas \textit{flow} (berdasarkan \textit{filename} unik) yang berhasil diproses oleh masing-masing komponen. Dataset final $\mathcal{D}$ dibentuk melalui operasi irisan himpunan (\textit{intersection}) seperti pada Persamaan \ref{eq:data_integrity}.
 
-    # The delta and gamma files contain redundant label columns.
-    # We must drop them before merging to avoid conflicts.
-    label_cols_to_drop = ['application', 'category', 'binary_type']
+\begin{myequation}{Integritas Dataset Final}
+    \label{eq:data_integrity}
+    \mathcal{D} = \{ \Omega_f \mid f \in S_\alpha \cap S_\beta \cap S_\gamma \}
+\end{myequation}
 
-    # Select only filename + delta features
-    delta_feature_cols = [col for col in df_delta.columns if col not in label_cols_to_drop]
-    df_delta_features_only = df_delta[delta_feature_cols]
+Operasi ini secara implisit membuang sampel yang rusak atau kosong pada salah satu tahap ekstraksi (misalnya, \textit{flow} tanpa \textit{payload} yang dibuang oleh komponen $\alpha$). Hasil akhir dari proses integrasi ini adalah matriks fitur $\mathbf{X}_{final} \in \mathbb{R}^{M \times 204}$, dimana $M$ adalah jumlah total sampel yang valid \citep{jorgensen2023extensible}.
 
-    # Select only filename + gamma' features
-    gamma_feature_cols = [col for col in df_gamma.columns if col not in label_cols_to_drop]
-    df_gamma_features_only = df_gamma[gamma_feature_cols]
-    \end{minted}
-    \captionsetup{font=small}
-    \caption{Potongan kode dari \texttt{merge\_hfv.py} menunjukkan penghapusan kolom label duplikat.}
-    \label{lst:snippet_merge1}
-\end{listing}
+Visualisasi konseptual dari penggabungan vektor ini ditampilkan pada Gambar \ref{fig:feature_fusion}.
 
-Setelah disiapkan, penggabungan akhir dilakukan menggunakan fungsi \texttt{pandas.merge} dengan metode \texttt{how='inner'}. Penggunaan \textit{inner join} (gabung internal) memastikan bahwa hanya \textit{flow} yang \texttt{filename}-nya ada di \textit{semua} komponen (label, $\alpha$, $\beta$, dan $\gamma$) yang akan dimasukkan ke dalam basis data final. Langkah penggabungan krusial ini ditunjukkan pada Kode \ref{lst:snippet_merge2}.
-
-\begin{listing}[H]
-\setstretch{1}
-    \begin{minted}[
-        fontsize=\footnotesize
-    ]{python}
-# Potongan kode dari merge_hfv.py
-
-    print("\nMerging... (using 'filename' as the key)")
-
-    # 1. Merge Base Labels + Alpha'' features
-    df_merged = pd.merge(df_base_labels, df_alpha_pp, on='filename', how='inner')
-    print(f"Shape after merging Alpha'': {df_merged.shape}")
-
-    # 2. Merge with Delta features
-    df_merged = pd.merge(df_merged, df_delta_features_only, on='filename', how='inner')
-    print(f"Shape after merging Delta:  {df_merged.shape}")
-
-    # 3. Merge with Gamma' features
-    df_final = pd.merge(df_merged, df_gamma_features_only, on='filename', how='inner')
-    print(f"Shape after merging Gamma': {df_final.shape}")
-
-    # --- Save Final Dataset ---
-    print(f"\nAssembly complete. Saving final dataset...")
-    df_final.to_csv(OUTPUT_FILE, index=False)
-    \end{minted}
-    \captionsetup{font=small}
-    \caption{Potongan kode dari \texttt{merge\_hfv.py} menunjukkan proses \textit{inner merge} sekuensial.}
-    \label{lst:snippet_merge2}
-\end{listing}
-
-Hasil akhir dari proses ini adalah satu file \texttt{final\_HFV\_dataset.csv}. Basis data fitur inilah yang kemudian digunakan sebagai input untuk melatih dan mengevaluasi berbagai model \textit{machine learning} yang akan dibahas pada bagian selanjutnya.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1.0\textwidth]{assets/pics/feature_fusion_genai1.png}
+    \caption{Konsep \textit{Feature Fusion} HFV: Penyatuan vektor fitur 1D-CNN ($\alpha$), statistik flow ($\beta$), dan statistik burst ($\gamma$) menjadi satu vektor 204-dimensi.}
+    \label{fig:feature_fusion}
+\end{figure}
 
 \subsection{Arsitektur Model Machine Learning untuk Klasifikasi}
 \label{subsec:arsitektur_model}
 
-Bagian terakhir dari sistem yang diusulkan adalah arsitektur klasifikasi yang bertanggung jawab untuk memetakan vektor fitur HFV ke kelas target yang sesuai (VPN/Non-VPN, Kategori, atau Aplikasi). Berdasarkan eksperimen pendahuluan dan studi literatur, penelitian ini mengadopsi pendekatan \textit{ensemble learning} dengan metode \textit{Soft Voting}, yang menggabungkan kekuatan algoritma \textbf{Random Forest (RF)} dan \textbf{XGBoost}.
+Bagian terakhir dari sistem yang diusulkan adalah arsitektur klasifikasi yang bertugas memetakan vektor fitur HFV ke kelas target. Penelitian ini mengadopsi pendekatan \textit{Ensemble Learning} dengan metode \textbf{Soft Voting}, yang menggabungkan kekuatan generalisasi dari \textit{Random Forest} (RF) dan kemampuan \textit{boosting} dari \textit{XGBoost} \citep{shao2024comparison}.
 
-Implementasi arsitektur ini terdapat dalam skrip \texttt{hfv\_final\_classifier\_soft\_voting\_best\_params.py}.
+\subsubsection{Pipeline Klasifikasi dan Standardisasi}
+Sebelum masuk ke model klasifikasi, vektor fitur $\Omega$ melewati tahap pra-pemrosesan untuk memastikan stabilitas numerik. Mengingat komponen $\beta$ (volume byte) dan $\gamma$ (durasi) memiliki rentang nilai yang sangat variatif, teknik \textit{Z-score Standardization} diterapkan.
 
-\subsubsection{Pipeline Klasifikasi}
-Proses klasifikasi dirancang sebagai sebuah \textit{pipeline} sistematis yang terdiri dari beberapa tahap:
+Setiap fitur $x$ dinormalisasi menjadi $z$ agar memiliki rata-rata nol dan variansi satu, sesuai Persamaan \ref{eq:standardization}.
 
-\begin{enumerate}
-    \item \textbf{Pra-pemrosesan Data:}
-    \begin{itemize}
-        \item \textbf{Pembersihan Nilai:} Menangani nilai \texttt{NaN} (kosong) atau \texttt{Infinity} yang mungkin muncul dari perhitungan statistik (misalnya pembagian dengan nol) dengan menggantinya menjadi nol.
-        \item \textbf{Encoding Label:} Mengubah label target string (misalnya "Chat", "Streaming") menjadi representasi numerik menggunakan \texttt{LabelEncoder} agar dapat diproses oleh algoritma XGBoost.
-        \item \textbf{Pemisahan Data:} Membagi dataset menjadi set pelatihan (80\%) dan set pengujian (20\%) secara \textit{stratified} untuk menjaga proporsi kelas yang seimbang.
-    \end{itemize}
-    
-    \item \textbf{Standarisasi Fitur:}
-    Semua fitur dinormalisasi menggunakan \texttt{StandardScaler} untuk mengubah distribusi fitur sehingga memiliki rata-rata 0 dan standar deviasi 1. Langkah ini krusial, terutama untuk model yang sensitif terhadap skala fitur, dan merupakan praktik terbaik dalam \textit{pipeline} machine learning \citep{scikitlearn}.
-    
-    \item \textbf{Model Ensemble (Soft Voting):}
-    Inti dari arsitektur ini adalah \textit{Voting Classifier} dengan strategi \textit{'soft voting'}. Strategi ini tidak hanya menghitung suara mayoritas (hard voting), tetapi merata-ratakan probabilitas prediksi dari setiap model dasar. Hal ini memungkinkan model yang lebih "yakin" dengan prediksinya memiliki bobot lebih besar dalam keputusan akhir.
-\end{enumerate}
+\begin{myequation}{Standardisasi Fitur (Z-score)}
+    \label{eq:standardization}
+    z = \frac{x - \mu}{\sigma}
+\end{myequation}
 
-Diagram alir proses klasifikasi ini diilustrasikan pada Gambar \ref{fig:classification_pipeline}.
+Dimana $\mu$ adalah rata-rata dan $\sigma$ adalah standar deviasi dari data latih. Langkah ini krusial untuk mencegah bias model terhadap fitur dengan magnitudo besar \citep{scikitlearn}.
+
+\subsubsection{Mekanisme Ensemble Soft Voting}
+Inti dari arsitektur klasifikasi ini adalah mekanisme \textit{Soft Voting}. Berbeda dengan \textit{Hard Voting} yang hanya menghitung mayoritas label kelas, \textit{Soft Voting} mempertimbangkan tingkat keyakinan (probabilitas) dari setiap model dasar (\textit{base learner}).
+
+Misalkan $P_{RF}(c|\mathbf{x})$ dan $P_{XGB}(c|\mathbf{x})$ adalah probabilitas bahwa input $\mathbf{x}$ termasuk dalam kelas $c$ yang diprediksi oleh Random Forest dan XGBoost. Keputusan kelas akhir $\hat{y}$ ditentukan dengan memilih kelas yang memiliki rata-rata probabilitas tertimbang tertinggi, seperti didefinisikan secara formal pada Persamaan \ref{eq:soft_voting_pred}.
+
+\begin{myequation}{Prediksi Soft Voting}
+    \label{eq:soft_voting_pred}
+    \hat{y} = \arg \max_{c \in C} \left( w_{RF} \cdot P_{RF}(c|\mathbf{x}) + w_{XGB} \cdot P_{XGB}(c|\mathbf{x}) \right)
+\end{myequation}
+
+Dimana $w$ adalah bobot kontribusi model (pada penelitian ini $w_{RF} = w_{XGB} = 0.5$ untuk skenario seimbang). Pendekatan ini terbukti lebih \textit{robust} karena memberikan penalti pada model yang memprediksi salah dengan keyakinan tinggi, dan menghargai model yang memprediksi benar dengan margin probabilitas yang jelas \citep{probst2019tunability}.
+
+Arsitektur lengkap dari pipeline klasifikasi ini diilustrasikan pada Gambar \ref{fig:classification_pipeline}.
 
 \begin{figure}[H]
     \centering
-    \captionsetup{font=small}
-\includegraphics[width=\textwidth]{assets/pics/soft_voting_arch.png}
-\caption{Arsitektur pipeline klasifikasi HFV menggunakan ensemble Soft Voting.}
+    \includegraphics[width=1.0\textwidth]{assets/pics/soft_voting_arch_genai.png}
+    \caption{Arsitektur Ensemble Soft Voting: Input HFV dinormalisasi, diproses secara paralel oleh RF dan XGBoost, kemudian probabilitasnya dirata-rata untuk menghasilkan prediksi akhir.}
     \label{fig:classification_pipeline}
 \end{figure}
 
-\subsubsection{Konfigurasi Model dan Hyperparameter}
-Pemilihan model \textbf{Random Forest} dan \textbf{XGBoost} didasarkan pada performa superior mereka dalam menangani data tabular berdimensi tinggi pada penelitian sebelumnya.
+\subsection{Konfigurasi Model dan Optimasi Hiperparameter}
+\label{subsec:model_config}
 
-Untuk mendapatkan performa optimal, parameter terbaik (\textit{best parameters}) untuk setiap model dan setiap tugas klasifikasi (Binary, Category, Application) telah ditentukan sebelumnya melalui proses \textit{Hyperparameter Tuning} yang ekstensif (menggunakan \textit{RandomizedSearchCV}). Nilai-nilai parameter ini "di-hardcode" ke dalam skrip final untuk memastikan reproduktifitas dan efisiensi eksekusi.
+Kinerja model \textit{ensemble} sangat bergantung pada pemilihan hiperparameter yang optimal. Mengingat ruang pencarian parameter yang luas untuk Random Forest dan XGBoost, penelitian ini menerapkan strategi pencarian acak (\textit{Randomized Search}) yang dipadukan dengan validasi silang (\textit{Cross-Validation}).
 
-Konfigurasi parameter terbaik yang digunakan untuk eksperimen mode \texttt{FULL} dirangkum dalam Tabel \ref{tab:best_params}.
+\subsubsection{Proses Penyetelan Hiperparameter}
+Tujuan dari proses ini adalah menemukan kombinasi parameter $\theta^*$ yang meminimalkan fungsi kerugian atau memaksimalkan metrik evaluasi (F1-Score) pada data validasi. Secara matematis, proses optimasi ini didefinisikan pada Persamaan \ref{eq:hyperparam_opt}.
+
+\begin{myequation}{Optimasi Hiperparameter}
+    \label{eq:hyperparam_opt}
+    \theta^* = \arg \max_{\theta \in \Theta} \left( \frac{1}{K} \sum_{k=1}^{K} \text{Metric}(f(X_{val}^{(k)}; \theta), y_{val}^{(k)}) \right)
+\end{myequation}
+
+Dimana $\Theta$ adalah ruang pencarian parameter, $K$ adalah jumlah lipatan validasi (5-fold CV), dan $f$ adalah model klasifikasi.
+
+Eksperimen dilakukan secara terpisah untuk setiap skenario tugas (Biner, Kategori, Aplikasi) guna menangkap karakteristik unik masing-masing distribusi kelas. Hasil parameter terbaik (\textit{Best Parameters}) yang diperoleh dari proses ini kemudian ditetapkan (\textit{hardcoded}) sebagai konfigurasi final model, sebagaimana dirangkum dalam Tabel \ref{tab:best_params}.
 
 \begin{table}[H]
     \centering
-    \caption{Parameter Terbaik untuk Ensemble Soft Voting (Mode FULL)}
+    \caption{Konfigurasi Parameter Terbaik untuk Ensemble Soft Voting (Mode FULL)}
     \label{tab:best_params}
     \resizebox{\textwidth}{!}{%
     \begin{tabular}{@{}llll@{}}
         \toprule
-        \textbf{Tugas} & \textbf{Model} & \textbf{Parameter Utama} & \textbf{Catatan} \\ 
+        \textbf{Tugas Klasifikasi} & \textbf{Model} & \textbf{Parameter Kunci} & \textbf{Peran dalam Ensemble} \\ 
         \midrule
-        \textbf{Binary} & Random Forest & n\_est=300, depth=20, crit=entropy & Model Utama \\
-        (VPN/Non-VPN) & XGBoost & n\_est=200, lr=0.1, depth=6 & Model Pendukung \\
+        \multirow{2}{*}{\textbf{Binary} (2 Kelas)} & Random Forest & $N_{est}=300$, $Depth=20$, $Crit=Entropy$ & \textit{Base Learner} 1 \\
+         & XGBoost & $N_{est}=200$, $LR=0.1$, $Depth=6$ & \textit{Base Learner} 2 \\
         \midrule
-        \textbf{Category} & XGBoost & n\_est=100, lr=0.2, depth=10 & Model Utama \\
-        (6 Kelas) & Random Forest & n\_est=200, depth=20, crit=gini & Model Pendukung \\
+        \multirow{2}{*}{\textbf{Category} (6 Kelas)} & XGBoost & $N_{est}=100$, $LR=0.2$, $Depth=10$ & \textit{Base Learner} 1 \\
+         & Random Forest & $N_{est}=200$, $Depth=20$, $Crit=Gini$ & \textit{Base Learner} 2 \\
         \midrule
-        \textbf{Application} & Random Forest & n\_est=100, depth=None, crit=gini & Model Utama \\
-        (6 Kelas) & XGBoost & n\_est=200, lr=0.1, depth=6 & Model Pendukung \\
+        \multirow{2}{*}{\textbf{Application} (6 Kelas)} & Random Forest & $N_{est}=100$, $Depth=None$, $Crit=Gini$ & \textit{Base Learner} 1 \\
+         & XGBoost & $N_{est}=200$, $LR=0.1$, $Depth=6$ & \textit{Base Learner} 2 \\
         \bottomrule
     \end{tabular}%
     }
 \end{table}
 
-Implementasi konfigurasi ini dalam kode Python ditunjukkan pada Kode \ref{lst:snippet_model_params}.
+\subsection{Algoritma Eksekusi Klasifikasi}
+\label{subsec:algo_klasifikasi}
 
-\begin{listing}[H]
-\setstretch{1}
-    \begin{minted}[
-        fontsize=\footnotesize
-    ]{python}
-# Potongan kode dari hfv_final_classifier_soft_voting_best_params.py
+Berdasarkan arsitektur dan konfigurasi yang telah ditetapkan, alur kerja sistem klasifikasi diimplementasikan dalam sebuah algoritma terstruktur. Algoritma ini mencakup tahapan inisialisasi pipeline, pembagian data (\textit{stratified splitting}), pelatihan model hibrida, hingga evaluasi akhir.
 
-HARDCODED_PARAMS = {
-    "FULL": {
-        "binary_type": {
-            # Winner: Random Forest
-            "rf": {"n_estimators": 300, "min_samples_split": 10, "max_depth": 20, "criterion": "entropy", "class_weight": "balanced"},
-            # Partner: XGBoost
-            "xgb": {"n_estimators": 200, "learning_rate": 0.1, "max_depth": 6, "subsample": 0.8, "eval_metric": "mlogloss"}
-        },
-        "category": {
-            # Winner: XGBoost
-            "xgb": {"n_estimators": 100, "learning_rate": 0.2, "max_depth": 10, "subsample": 1.0, "eval_metric": "mlogloss"},
-            # ... (RF params)
-        },
-        # ... (Application params)
-    },
-    # ... (VPN_ONLY params)
-    \end{minted}
-    \captionsetup{font=small}
-    \caption{Definisi parameter hardcoded untuk setiap tugas klasifikasi.}
-    \label{lst:snippet_model_params}
-\end{listing}
-
-\subsubsection{Algoritma Eksekusi Klasifikasi}
-Logika eksekusi utama dari sistem klasifikasi ini, mulai dari pembuatan pipeline hingga evaluasi, dijelaskan dalam Pseudocode \ref{lst:alg_classifier}.
+Logika prosedural dari sistem klasifikasi HFV ditunjukkan pada Kode~\ref{lst:alg_classifierg}.
 
 \begin{listing}[H]
     \setstretch{1}    
     \begin{algorithmic}[1]
-        \Require Dataset HFV (.csv), Mode Eksperimen (FULL/VPN\_ONLY)
-        \Ensure Laporan Klasifikasi (Akurasi, F1-Score)
+        \Require Dataset HFV ($\mathcal{D}$), Mode Eksperimen ($E \in \{\text{FULL, VPN\_ONLY}\}$), Daftar Tugas $T$
+        \Ensure Laporan Kinerja Model (Akurasi, F1-Score)
 
-        \Procedure{GetVotingPipeline}{$task, mode$}
-            \State $params \gets HardcodedParams[mode][task]$
+        \Statex \Comment{\textbf{Fungsi Inisialisasi Model}}
+        \Function{GetVotingPipeline}{$task, mode$}
+            \State $\theta_{RF}, \theta_{XGB} \gets \text{LoadBestParams}(task, mode)$
+            \State $Model_{RF} \gets \textbf{new } \text{RandomForest}(\theta_{RF})$
+            \State $Model_{XGB} \gets \textbf{new } \text{XGBoost}(\theta_{XGB})$
             
-            \State \Comment{1. Instansiasi Model Dasar}
-            \State $rf \gets \textbf{new } RandomForest(params[\text{'rf'}])$
-            \State $xgb \gets \textbf{new } XGBoost(params[\text{'xgb'}])$
+            \State \Comment{Inisialisasi Soft Voting Ensemble}
+            \State $Ensemble \gets \text{VotingClassifier}(\{Model_{RF}, Model_{XGB}\}, \text{voting='soft'})$
+            
+            \State \Comment{Bungkus dalam Pipeline dengan Standard Scaler}
+            \State \Return $\textbf{new } \text{Pipeline}(\text{StandardScaler}, Ensemble)$
+        \EndFunction
 
-            \State \Comment{2. Buat Ensemble Voting (Soft/Probabilitas)}
-            \State $voting \gets \textbf{new } VotingClassifier(\{rf, xgb\}, \text{'soft'})$
+        \Statex \Comment{\textbf{Prosedur Utama}}
+        \Procedure{MainExecution}{}
+            \State $df \gets \text{LoadCSV}(\mathcal{D})$
+            
+            \For{\textbf{each} $task$ \textbf{in} $T$}
+                \State \textbf{print}("Memproses Tugas: " + $task$)
+                
+                \State \Comment{Persiapan Data \& Encoding Label}
+                \State $\mathbf{X} \gets df[\text{HFV\_Features}]$
+                \State $\mathbf{y} \gets \text{LabelEncoder}(df[task])$
+                
+                \State \Comment{Split Data 80:20 secara Stratified}
+                \State $\mathbf{X}_{train}, \mathbf{X}_{test}, \mathbf{y}_{train}, \mathbf{y}_{test} \gets \text{StratifiedSplit}(\mathbf{X}, \mathbf{y}, 0.2)$
 
-            \State \Comment{3. Bungkus dalam Pipeline dengan Scaler}
-            \State \Return $\textbf{new } Pipeline(\text{StandardScaler}, voting)$
-        \EndProcedure
+                \State \Comment{Latih Model}
+                \State $Pipeline \gets \Call{GetVotingPipeline}{task, E}$
+                \State $Pipeline.\text{fit}(\mathbf{X}_{train}, \mathbf{y}_{train})$
 
-        \Statex
-
-        \Procedure{RunTask}{$df, task$}
-            \State \Comment{Persiapan Data \& Encoding}
-            \State $X \gets \Call{CleanValues}{df[HFV\_Features]}$
-            \State $y \gets \Call{LabelEncode}{df[task]}$
-
-            \State \Comment{Split Data 80:20 (Stratified)}
-            \State $X_{tr}, X_{te}, y_{tr}, y_{te} \gets \Call{TrainTestSplit}{X, y, 0.2}$
-
-            \State \Comment{Dapatkan Pipeline \& Latih}
-            \State $model \gets \Call{GetVotingPipeline}{task, ExperimentMode}$
-            \State $model.\text{fit}(X_{tr}, y_{tr})$
-
-            \State \Comment{Evaluasi Hasil}
-            \State $preds \gets model.\text{predict}(X_{te})$
-            \State $metrics \gets \Call{CalculateMetrics}{y_{te}, preds}$
-            \State \Call{PrintReport}{metrics}
-        \EndProcedure
-
-        \Statex
-
-        \Procedure{MainClassification}{}
-            \State $df \gets \Call{LoadData}{FinalPESVFile}$
-            \State $Tasks \gets [\text{'binary\_type'}, \text{'category'}, \text{'application'}]$
-
-            \For{\textbf{each} $task$ \textbf{in} $Tasks$}
-                \If{$task \in df.\text{columns}$}
-                    \State \Call{RunTask}{df, task}
-                \EndIf
+                \State \Comment{Prediksi dan Evaluasi}
+                \State $\mathbf{y}_{pred} \gets Pipeline.\text{predict}(\mathbf{X}_{test})$
+                \State $Metrics \gets \text{CalculateMetrics}(\mathbf{y}_{test}, \mathbf{y}_{pred})$
+                
+                \State \textbf{Output} $Metrics$
             \EndFor
         \EndProcedure
-
     \end{algorithmic}
         \caption{Alur kerja klasifikasi menggunakan ensemble Soft Voting.} 
     \label{lst:alg_classifierg}
 \end{listing}
-
-Implementasi teknis dari pembuatan \textit{ensemble} ini menggunakan pustaka \texttt{scikit-learn} ditunjukkan pada Potongan Kode \ref{lst:snippet_voting}.
-
-\begin{listing}[H]
-\setstretch{1}
-    \begin{minted}[
-        fontsize=\footnotesize
-    ]{python}
-# Potongan kode dari hfv_final_classifier_soft_voting_best_params.py
-# (Fungsi get_voting_pipeline)
-
-    # 1. Instantiate Individual Models
-    rf_clf = RandomForestClassifier(random_state=RANDOM_STATE, n_jobs=-1, **params['rf'])
-    xgb_clf = XGBClassifier(random_state=RANDOM_STATE, n_jobs=-1, **params['xgb'])
-
-    # 2. Create Voting Ensemble (Soft Voting)
-    # Soft voting averages the probabilities, which is usually superior for diverse models
-    voting_clf = VotingClassifier(
-        estimators=[('rf', rf_clf), ('xgb', xgb_clf)],
-        voting='soft',
-        n_jobs=-1
-    )
-
-    # 3. Wrap in Pipeline
-    pipeline = Pipeline([
-        ('scaler', StandardScaler()),
-        ('voting', voting_clf)
-    ])
-    
-    return pipeline
-    \end{minted}
-    \captionsetup{font=small}
-    \caption{Implementasi \textit{VotingClassifier} dengan strategi \textit{soft voting}.}
-    \label{lst:snippet_voting}
-\end{listing}
-
-Dengan arsitektur ini, sistem HFV dapat secara otomatis beradaptasi dan memberikan prediksi terbaik untuk berbagai tingkat granularitas klasifikasi (biner, kategori, atau aplikasi) dengan memanfaatkan kekuatan gabungan dari dua algoritma \textit{state-of-the-art}.
